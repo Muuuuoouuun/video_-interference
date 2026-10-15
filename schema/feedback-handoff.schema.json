@@ -1,0 +1,148 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Muuuuoouuun/video_-interference/schema/feedback-handoff.schema.json",
+  "title": "시간별 영상 피드백 전달 형식 v2",
+  "description": "피드백 내보내기(manifest.json, kind video-feedback-handoff)와 요청별 AI용 자료(kind video-feedback-context)가 같은 feedback[] 항목 형식을 공유합니다. 프레임은 30fps, 구간은 반열린 [frameIn, frameOut)입니다. 영상 파일은 포함하지 않습니다.",
+  "oneOf": [{ "$ref": "#/$defs/handoff" }, { "$ref": "#/$defs/context" }],
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,160}$" },
+    "frame": { "type": "integer", "minimum": 0 },
+    "nullableFrame": { "type": ["integer", "null"], "minimum": 0 },
+    "relativePath": { "type": "string", "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._/-]{1,240}$" },
+    "range": {
+      "type": "object", "additionalProperties": false, "required": ["frameIn", "frameOut"],
+      "properties": { "frameIn": { "$ref": "#/$defs/frame" }, "frameOut": { "$ref": "#/$defs/frame" } }
+    },
+    "projectedRange": {
+      "type": "object", "additionalProperties": false, "required": ["frameIn", "frameOut"],
+      "properties": { "frameIn": { "$ref": "#/$defs/frame" }, "frameOut": { "$ref": "#/$defs/frame" }, "sourceIn": { "type": "number", "minimum": 0 }, "sourceOut": { "type": "number", "minimum": 0 } }
+    },
+    "point": { "type": "object", "additionalProperties": false, "required": ["x", "y"], "properties": { "x": { "type": "number", "minimum": 0, "maximum": 1 }, "y": { "type": "number", "minimum": 0, "maximum": 1 } } },
+    "drawing": {
+      "type": "object", "additionalProperties": false, "required": ["id", "kind", "color", "points"],
+      "properties": {
+        "id": { "type": "string", "maxLength": 80 },
+        "kind": { "enum": ["rect", "ellipse", "line", "arrow", "pen"] },
+        "color": { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$" },
+        "points": { "type": "array", "maxItems": 2000, "items": { "$ref": "#/$defs/point" } },
+        "frame": { "$ref": "#/$defs/frame" },
+        "region": { "type": "object", "additionalProperties": false, "required": ["x", "y", "w", "h"], "properties": { "x": { "type": "number" }, "y": { "type": "number" }, "w": { "type": "number" }, "h": { "type": "number" } } },
+        "strokeWidth": { "type": "number" }, "opacity": { "type": "number", "minimum": 0, "maximum": 1 }, "fill": { "type": "string" }
+      }
+    },
+    "transcript": {
+      "description": "사용자가 명시적으로 실행한 로컬 자동 받아쓰기 결과. 원본 음성과 다를 수 있습니다.",
+      "type": "object", "additionalProperties": false, "required": ["source", "engine", "text", "segments", "createdAt"],
+      "properties": {
+        "source": { "const": "asr" }, "engine": { "type": "string", "maxLength": 40 }, "model": { "type": "string", "maxLength": 160 }, "language": { "type": "string", "maxLength": 16 },
+        "text": { "type": "string", "maxLength": 100000 }, "createdAt": { "type": "string" },
+        "segments": { "type": "array", "maxItems": 5000, "items": { "type": "object", "additionalProperties": false, "required": ["startMs", "endMs", "text"], "properties": { "startMs": { "type": "integer", "minimum": 0 }, "endMs": { "type": "integer", "minimum": 0 }, "text": { "type": "string" } } } }
+      }
+    },
+    "attachment": {
+      "type": "object", "additionalProperties": false, "required": ["id", "name", "role", "mimeType", "file"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" }, "name": { "type": "string", "maxLength": 200 }, "role": { "enum": ["reference", "insert", "voice"] },
+        "mimeType": { "type": "string" }, "file": { "$ref": "#/$defs/relativePath" },
+        "automaticTranscription": { "type": "boolean" }, "source": { "type": "string" }, "transcript": { "$ref": "#/$defs/transcript" }
+      }
+    },
+    "observation": {
+      "description": "별도로 실행한 모델 관찰. 사용자 기록이 아니며 stale이면 이후 피드백이 바뀐 상태입니다.",
+      "type": "object", "additionalProperties": false, "required": ["source", "provider", "model", "createdAt", "stale", "observedScene", "feedbackSummary", "questions", "evidenceFrames"],
+      "properties": {
+        "source": { "const": "model" }, "provider": { "type": "string" }, "model": { "type": "string" }, "createdAt": { "type": "string" }, "stale": { "type": "boolean" },
+        "observedScene": { "type": "string", "maxLength": 4000 }, "feedbackSummary": { "type": "string", "maxLength": 8000 },
+        "questions": { "type": "array", "items": { "type": "string", "maxLength": 1000 } }, "evidenceFrames": { "type": "array", "items": { "$ref": "#/$defs/frame" } }
+      }
+    },
+    "sheet": {
+      "type": "object", "additionalProperties": false, "required": ["file", "width", "height", "cells"],
+      "properties": {
+        "file": { "$ref": "#/$defs/relativePath" }, "width": { "type": "integer", "minimum": 1 }, "height": { "type": "integer", "minimum": 1 },
+        "cells": { "type": "array", "minItems": 1, "items": { "type": "object", "additionalProperties": false, "required": ["frame", "roles", "annotated", "x", "y", "w", "h"], "properties": { "frame": { "$ref": "#/$defs/frame" }, "roles": { "type": "array", "items": { "type": "string" } }, "annotated": { "type": "boolean" }, "x": { "type": "integer" }, "y": { "type": "integer" }, "w": { "type": "integer" }, "h": { "type": "integer" } } } }
+      }
+    },
+    "entry": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "number", "kind", "sceneDescription", "feedback", "authored", "current", "drawings", "drawingProjection", "scenes", "attachments"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" }, "number": { "type": "integer", "minimum": 1 }, "kind": { "enum": ["request", "note"] },
+        "status": { "type": "string" }, "createdAt": { "type": "string" },
+        "sceneDescription": { "type": "object", "additionalProperties": false, "required": ["source", "text"], "properties": { "source": { "enum": ["user", "not-provided"] }, "text": { "type": "string", "maxLength": 500 } } },
+        "feedback": {
+          "type": "object", "additionalProperties": false, "required": ["original", "supplements"],
+          "properties": { "original": { "type": "string" }, "supplements": { "type": "array", "items": { "type": "object", "required": ["id", "text"], "properties": { "id": { "$ref": "#/$defs/id" }, "text": { "type": "string" }, "createdAt": { "type": "string" } } } } }
+        },
+        "authored": {
+          "type": "object", "additionalProperties": false, "required": ["versionId", "versionNumber", "frameIn", "frameOut", "contextFrame", "sourceRanges"],
+          "properties": { "versionId": { "$ref": "#/$defs/id" }, "versionNumber": { "type": ["integer", "null"], "minimum": 1 }, "frameIn": { "$ref": "#/$defs/frame" }, "frameOut": { "$ref": "#/$defs/frame" }, "contextFrame": { "$ref": "#/$defs/frame" }, "sourceRanges": { "type": "array", "items": { "$ref": "#/$defs/range" } } }
+        },
+        "current": {
+          "type": "object", "additionalProperties": false, "required": ["versionId", "status", "ranges", "contextFrame", "contextStatus", "deletedSourceRanges"],
+          "properties": {
+            "versionId": { "$ref": "#/$defs/id" }, "status": { "enum": ["present", "partial", "deleted", "unavailable"] },
+            "ranges": { "type": "array", "items": { "$ref": "#/$defs/projectedRange" } }, "contextFrame": { "$ref": "#/$defs/nullableFrame" },
+            "contextStatus": { "enum": ["present", "deleted", "unavailable"] }, "deletedSourceRanges": { "type": "array", "items": { "$ref": "#/$defs/range" } }
+          }
+        },
+        "drawings": { "type": "array", "maxItems": 30, "items": { "$ref": "#/$defs/drawing" } },
+        "drawingProjection": {
+          "type": "array", "maxItems": 30,
+          "items": { "type": "object", "additionalProperties": false, "required": ["id", "authoredFrame", "frame", "status", "description"], "properties": { "id": { "type": "string" }, "authoredFrame": { "$ref": "#/$defs/nullableFrame" }, "frame": { "$ref": "#/$defs/nullableFrame" }, "status": { "enum": ["present", "deleted", "unavailable"] }, "description": { "type": "string", "minLength": 1 } } }
+        },
+        "scenes": {
+          "type": "array", "minItems": 1,
+          "items": { "type": "object", "additionalProperties": false, "required": ["frame", "roles", "drawingIds", "file"], "properties": { "frame": { "$ref": "#/$defs/frame" }, "roles": { "type": "array", "items": { "enum": ["comment-context", "request-start", "request-middle", "request-end", "drawing-context"] } }, "drawingIds": { "type": "array", "items": { "type": "string" } }, "file": { "$ref": "#/$defs/relativePath" }, "annotatedFile": { "$ref": "#/$defs/relativePath" } } }
+        },
+        "sheet": { "$ref": "#/$defs/sheet" },
+        "attachments": { "type": "array", "maxItems": 11, "items": { "$ref": "#/$defs/attachment" } },
+        "observations": { "type": "array", "items": { "$ref": "#/$defs/observation" } },
+        "layerChange": { "type": "object" }, "layerTarget": { "type": "object" }, "proposedOperations": { "type": "array" }, "proposedOperationsRole": { "type": "string" }
+      }
+    },
+    "file": {
+      "type": "object", "additionalProperties": false, "required": ["path", "mimeType", "role", "bytes", "sha256"],
+      "properties": {
+        "path": { "$ref": "#/$defs/relativePath", "not": { "pattern": "\\.(?:mp4|mov|m4v|mkv|avi|webm|mxf)$" } },
+        "mimeType": { "type": "string", "not": { "pattern": "^video/" } },
+        "role": { "enum": ["scene", "annotation", "sheet", "overview", "attachment"] },
+        "bytes": { "type": "integer", "minimum": 1 }, "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    },
+    "handoff": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schemaVersion", "kind", "cacheKey", "createdAt", "localOnly", "modelCalled", "networkUsed", "sourceVideoIncluded", "renderedVideoIncluded", "automaticTranscription", "modelObservationsIncluded", "frameConvention", "guide", "project", "targetVersion", "overview", "feedback", "files", "stats", "diagnostics"],
+      "properties": {
+        "schemaVersion": { "const": 2 }, "kind": { "const": "video-feedback-handoff" }, "cacheKey": { "type": "string", "pattern": "^[a-f0-9]{64}$" }, "createdAt": { "type": "string" },
+        "localOnly": { "const": true }, "modelCalled": { "const": false }, "networkUsed": { "const": false }, "sourceVideoIncluded": { "const": false }, "renderedVideoIncluded": { "const": false },
+        "automaticTranscription": { "const": false, "description": "내보내기 과정에서 받아쓰기를 실행하지 않았다는 뜻입니다. 미리 실행한 받아쓰기는 attachments[].transcript에 출처와 함께 들어갑니다." },
+        "modelObservationsIncluded": { "type": "boolean" }, "frameConvention": { "type": "string" }, "guide": { "type": "string" },
+        "project": { "type": "object", "required": ["id", "name"], "properties": { "id": { "type": "string" }, "name": { "type": "string" } } },
+        "targetVersion": { "type": "object", "additionalProperties": false, "required": ["id", "number", "label", "durationFrames", "fps"], "properties": { "id": { "$ref": "#/$defs/id" }, "number": { "type": "integer", "minimum": 1 }, "label": { "type": "string" }, "durationFrames": { "type": "integer", "minimum": 1 }, "fps": { "const": 30 } } },
+        "overview": {
+          "type": "object", "additionalProperties": false, "required": ["versionId", "versionNumber", "durationFrames", "grid", "shots"],
+          "properties": {
+            "versionId": { "$ref": "#/$defs/id" }, "versionNumber": { "type": "integer" }, "durationFrames": { "type": "integer", "minimum": 1 },
+            "grid": { "type": "object", "required": ["file", "width", "height", "columns", "cells"], "properties": { "file": { "const": "overview/grid.jpg" }, "cells": { "type": "array", "items": { "type": "object", "required": ["frame", "time", "x", "y", "w", "h"] } } } },
+            "shots": { "type": "object", "required": ["method", "threshold", "estimated", "cuts", "list"], "properties": { "estimated": { "const": true }, "cuts": { "type": "array", "items": { "$ref": "#/$defs/frame" } }, "list": { "type": "array", "minItems": 1, "items": { "type": "object", "required": ["index", "frameIn", "frameOut"] } } } }
+          }
+        },
+        "feedback": { "type": "array", "minItems": 1, "maxItems": 300, "items": { "$ref": "#/$defs/entry" } },
+        "files": { "type": "array", "items": { "$ref": "#/$defs/file" } },
+        "stats": { "type": "object" }, "diagnostics": { "type": "object" }
+      }
+    },
+    "context": {
+      "type": "object",
+      "description": "편집 기능의 요청별 AI용 자료. feedback[0]이 공용 항목이며, 나머지 최상위 필드는 기존 편집 도구와의 호환용입니다.",
+      "required": ["schemaVersion", "kind", "frameConvention", "guide", "localOnly", "sourceVideoIncluded", "renderedVideoIncluded", "feedback", "files", "modelCalled", "networkUsed"],
+      "properties": {
+        "schemaVersion": { "const": 2 }, "kind": { "const": "video-feedback-context" }, "localOnly": { "const": true }, "modelCalled": { "const": false }, "networkUsed": { "const": false },
+        "sourceVideoIncluded": { "const": false }, "renderedVideoIncluded": { "const": false },
+        "feedback": { "type": "array", "minItems": 1, "maxItems": 1, "items": { "$ref": "#/$defs/entry" } },
+        "files": { "type": "array", "items": { "$ref": "#/$defs/file" } }
+      }
+    }
+  }
+}

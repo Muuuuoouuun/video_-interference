@@ -12,7 +12,9 @@ export interface SourceRange { frameIn: number; frameOut: number }
 export interface TimelineSegment { sourceIn: number; sourceOut: number; outputIn: number; outputOut: number; speed: number; volume: number }
 export interface Project { id: string; name: string; activeVersionId: string; createdAt: string }
 export interface Asset { id: string; name: string; durationFrames: number; fps: 30; width: number; height: number; hasAudio: boolean; mediaUrl: string; thumbnailUrl: string; originalFps?: string; audioOffsetSeconds?: number }
-export interface Attachment { id: string; name: string; role: 'reference' | 'insert' | 'voice'; mimeType: string; mediaUrl: string; createdAt: string }
+/** Local automatic speech-to-text the user started explicitly. It can be wrong; the audio stays the source. */
+export interface AttachmentTranscript { source: 'asr'; engine: string; model?: string; language?: string; text: string; segments: { startMs: number; endMs: number; text: string }[]; createdAt: string }
+export interface Attachment { id: string; name: string; role: 'reference' | 'insert' | 'voice'; mimeType: string; mediaUrl: string; createdAt: string; transcript?: AttachmentTranscript }
 export interface Version { id: string; assetId: string; number: number; parentVersionId: string | null; durationFrames: number; mediaUrl: string; thumbnailUrl: string; opIds: string[]; appliedOpIds?: string[]; timelineMap: TimelineSegment[]; createdAt: string; status: 'ready' | 'rendering' | 'failed'; label: string }
 export interface LayerChange { action: 'replace' | 'remove'; targetLayerId: string; targetOpId: string }
 export interface CommentSupplement { id: string; text: string; createdAt: string }
@@ -34,4 +36,4 @@ export interface LayerChangeInput { action: 'replace' | 'remove'; targetOpId: st
 export interface LayerChangeResult { comment: Comment; op: EditOp }
 
 /** Locally prepared, portable feedback materials; video files are excluded. */
-export interface FeedbackExportResult { manifestUrl: string; markdownUrl: string; archiveUrl: string; commentCount: number; sceneCount: number }
+export interface FeedbackExportResult { manifestUrl: string; markdownUrl: string; jsonlUrl: string; vttUrl: string; archiveUrl: string; commentCount: number; sceneCount: number }

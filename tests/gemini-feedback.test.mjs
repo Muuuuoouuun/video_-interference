@@ -198,3 +198,37 @@ test('Gemini also applies the encoded JSON size limit to long feedback without t
   await f.save();
   await assert.rejects(prepareGeminiFeedback(f.manifestPath), errorCode('REQUEST_TOO_LARGE'));
 });
+
+test('format v2 sends one sheet per feedback by default, keeps full stills opt-in and transcripts opt-in', async t => {
+  const f = await fixture(t);
+  const sheet = await f.add('sheets/feedback-0001.jpg', f.jpeg, 'image/jpeg', 'sheet');
+  const annotated = await f.add('annotations/feedback-0001/frame-000075.jpg', f.jpeg, 'image/jpeg', 'annotation');
+  f.manifest.files = f.manifest.files.filter(file => !file.path.endsWith('.png') || file.path.startsWith('attachments/'));
+  f.manifest.schemaVersion = 2;
+  const transcriptText = '자막을 조금 더 크게 해 주세요';
+  f.entry.scenes = [{ frame: 75, file: f.entry.scenes[0].file, annotatedFile: annotated.path }, f.entry.scenes[1]];
+  f.entry.sheet = { file: sheet.path, width: 32, height: 20, cells: [{ frame: 75, roles: ['comment-context'], annotated: true, x: 0, y: 0, w: 32, h: 14 }, { frame: 90, roles: ['request-end'], annotated: false, x: 0, y: 14, w: 8, h: 5 }] };
+  f.entry.drawingProjection = [{ id: 'drawing-one', authoredFrame: 75, frame: null, status: 'deleted', description: '파란 박스(#2655e3) · 화면 왼쪽 위 · 가로 10–50%, 세로 10–40% (화면의 약 12%)' }];
+  f.entry.attachments[1].transcript = { source: 'asr', engine: 'whisper.cpp', model: 'ggml-base.bin', language: 'ko', text: transcriptText, segments: [], createdAt: '2026-10-15T00:00:00Z' };
+  f.manifest.feedback = [f.entry]; await f.save();
+  const prepared = await prepareGeminiFeedback(f.manifestPath), parts = prepared.request.contents[0].parts, payload = JSON.parse(parts[0].text);
+  assert.equal(prepared.summary.imageDetail, 'sheet'); assert.equal(prepared.summary.imageCount, 2, 'one sheet plus the reference image');
+  const bindings = parts.slice(1).filter(part => part.text).map(part => JSON.parse(part.text).image.bindings).flat();
+  assert.deepEqual(bindings.map(item => item.type).sort(), ['reference', 'scene_sheet']);
+  assert.deepEqual(bindings.find(item => item.type === 'scene_sheet').cells.map(cell => cell.frame), [75, 90]);
+  assert.equal(payload.imageDetail, 'sheet'); assert.deepEqual(payload.feedback[0].drawingDescriptions, [{ id: 'drawing-one', description: f.entry.drawingProjection[0].description }]);
+  assert.ok(!JSON.stringify(prepared.request).includes(transcriptText), 'transcripts stay local unless explicitly included');
+  assert.match(prepared.request.systemInstruction.parts[0].text, /scene_sheet/);
+  const withTranscript = await prepareGeminiFeedback(f.manifestPath, { includeTranscripts: true });
+  assert.equal(JSON.parse(withTranscript.request.contents[0].parts[0].text).feedback[0].attachments.find(item => item.role === 'voice').transcript.text, transcriptText);
+  assert.equal(withTranscript.summary.transcriptsIncluded, 1); assert.ok(!JSON.stringify(withTranscript.request).includes('private voice content'), 'audio bytes are never sent');
+  const full = await prepareGeminiFeedback(f.manifestPath, { detail: 'full' });
+  assert.equal(full.summary.imageDetail, 'full'); assert.equal(full.summary.imageCount, 4, 'full detail keeps both stills, the JPEG annotation and the reference');
+  await assert.rejects(prepareGeminiFeedback(f.manifestPath, { detail: 'everything' }), errorCode('INVALID_FEEDBACK_BUNDLE'));
+  const result = await analyzeGeminiFeedback(prepared, { apiKey: key, fetchImpl: fetchResult(envelope([analysis(f.entry, { evidenceFrames: [90] })])) });
+  const { entryDigest } = await import('../apps/worker/handoff.mjs');
+  assert.equal(result.feedback[0].entryDigest, entryDigest(f.entry));
+  delete f.entry.sheet; await f.save();
+  await assert.rejects(prepareGeminiFeedback(f.manifestPath, { detail: 'sheet' }), /한 장 요약이 없는 자료/);
+  assert.equal((await prepareGeminiFeedback(f.manifestPath)).summary.imageDetail, 'full', 'auto falls back to full stills when sheets are absent');
+});

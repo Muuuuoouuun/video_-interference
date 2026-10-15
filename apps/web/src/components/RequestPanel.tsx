@@ -13,7 +13,7 @@ const labels = { cut: '구간 삭제', trim: '구간만 유지', speed: '배속'
 const filterIcons = { all: LayoutList, feedback: MessageSquare, notes: StickyNote, awaiting: Clock3, pending: SlidersHorizontal, applied: Check };
 const icons = { cut: Scissors, trim: Scissors, speed: Clock3, subtitle: Type, overlay: Image, audio: Volume2, note: FileText };
 export interface PreparedContextBundle { manifestUrl: string; archiveUrl?: string; sceneCount: number; drawingSceneCount: number; attachmentCount: number }
-interface Props { headerActions?: ReactNode; keyboardEnabled?: boolean; editingMode?: boolean; revealToken?: number; comments: Comment[]; attachments: Attachment[]; ops: EditOp[]; versions: Version[]; currentVersion: Version; selectedId: string | null; busy: boolean; onSelect: (comment: Comment) => void; onSelectAuthored: (comment: Comment) => void; onOp: (id: string, patch: Record<string, unknown>) => Promise<boolean>; onInterpret: (id: string) => Promise<void>; onPrepareContextBundle: (id: string) => Promise<PreparedContextBundle | null>; onSupplement: (id: string, text: string) => Promise<boolean>; onEditComment: (id: string, patch: { text: string; sceneDescription: string }) => Promise<boolean>; onDeleteComment: (id: string) => Promise<boolean>; onDraftChange?: (hasContent: boolean) => void; previewOpId?: string|null; onPreviewOverlay?: (id: string) => void }
+interface Props { headerActions?: ReactNode; keyboardEnabled?: boolean; editingMode?: boolean; revealToken?: number; comments: Comment[]; attachments: Attachment[]; ops: EditOp[]; versions: Version[]; currentVersion: Version; selectedId: string | null; busy: boolean; onSelect: (comment: Comment) => void; onSelectAuthored: (comment: Comment) => void; onOp: (id: string, patch: Record<string, unknown>) => Promise<boolean>; onInterpret: (id: string) => Promise<void>; onPrepareContextBundle: (id: string) => Promise<PreparedContextBundle | null>; onSupplement: (id: string, text: string) => Promise<boolean>; onEditComment: (id: string, patch: { text: string; sceneDescription: string }) => Promise<boolean>; onDeleteComment: (id: string) => Promise<boolean>; onDraftChange?: (hasContent: boolean) => void; previewOpId?: string|null; onPreviewOverlay?: (id: string) => void; onTranscribe?: (id: string) => Promise<void>; transcribingId?: string | null }
 
 interface CommentDraft { text: string; sceneDescription: string; originalText: string; originalSceneDescription: string }
 function isChangedDraft(draft: CommentDraft) { return draft.text !== draft.originalText || draft.sceneDescription !== draft.originalSceneDescription; }
@@ -25,7 +25,7 @@ function supplementTime(value: string) {
   return Number.isNaN(date.getTime()) ? '' : date.toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Seoul' });
 }
 
-export const RequestPanel = memo(function RequestPanel({ headerActions, keyboardEnabled = true, editingMode = false, revealToken = 0, comments, attachments, ops, versions, currentVersion, selectedId, busy, onSelect, onSelectAuthored, onOp, onInterpret, onPrepareContextBundle, onSupplement, onEditComment, onDeleteComment, onDraftChange, previewOpId, onPreviewOverlay }: Props) {
+export const RequestPanel = memo(function RequestPanel({ headerActions, keyboardEnabled = true, editingMode = false, revealToken = 0, comments, attachments, ops, versions, currentVersion, selectedId, busy, onSelect, onSelectAuthored, onOp, onInterpret, onPrepareContextBundle, onSupplement, onEditComment, onDeleteComment, onDraftChange, previewOpId, onPreviewOverlay, onTranscribe, transcribingId }: Props) {
   const panelRef = useRef<HTMLElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const localSelection = useRef<string|null>(null);
@@ -310,7 +310,7 @@ export const RequestPanel = memo(function RequestPanel({ headerActions, keyboard
             <div className="rq-editor-footer"><span>⌘ / Ctrl + Enter 저장</span><div><button type="button" className="quiet" disabled={supplementBusy} onClick={() => cancelCommentEdit(comment.id)}>취소</button><button type="submit" className="outline-mint" disabled={supplementBusy || !canSaveEdit}>{savingCommentId === comment.id ? <LoaderCircle size={13} className="spinning"/> : <Check size={13}/>}수정 저장</button></div></div>
           </form>}
           {supplements.length > 0 ? <ol className="rq-supplement-history" aria-label={isNote ? '메모 보완 기록' : '추가 지시 기록'}>{supplements.map((supplement, supplementIndex) => <li key={supplement.id}><div><span>{isNote ? '메모 보완' : '추가 지시'} {supplementIndex + 1}</span><time dateTime={supplement.createdAt}>{supplementTime(supplement.createdAt)}</time></div><p>{supplement.text}</p></li>)}</ol> : null}
-          <AttachmentGallery compact attachments={attachments.filter(attachment => comment.attachmentIds.includes(attachment.id) || comment.voiceAssetId === attachment.id)}/>
+          <AttachmentGallery compact disabled={busy} onTranscribe={onTranscribe} transcribingId={transcribingId} attachments={attachments.filter(attachment => comment.attachmentIds.includes(attachment.id) || comment.voiceAssetId === attachment.id)}/>
           {comment.clarification ? <p className="clarification">{comment.clarification}</p> : null}
           {(editingMode || isLayerChange ? related : []).map(op => {
             const Icon = icons[op.type];

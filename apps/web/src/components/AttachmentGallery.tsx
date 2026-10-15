@@ -1,14 +1,15 @@
 import { useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowUpRight, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Image, Mic, X, ZoomIn } from 'lucide-react';
+import { ArrowUpRight, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, FileText, Image, LoaderCircle, Mic, X, ZoomIn } from 'lucide-react';
 import type { Attachment } from '../../../../packages/core/types';
 import './AttachmentGallery.css';
 
-interface Props { attachments: Attachment[]; onRemove?: (id: string) => void; disabled?: boolean; compact?: boolean }
+/** onTranscribe appears only when local speech-to-text is configured; it is always an explicit user action. */
+interface Props { attachments: Attachment[]; onRemove?: (id: string) => void; disabled?: boolean; compact?: boolean; onTranscribe?: (id: string) => Promise<void>; transcribingId?: string | null }
 const roleLabels = { reference: '참고 이미지', insert: '영상 삽입', voice: '음성 피드백' };
 
 /** Same attachment treatment while composing and reviewing saved feedback. */
-export function AttachmentGallery({ attachments, onRemove, disabled = false, compact = false }: Props) {
+export function AttachmentGallery({ attachments, onRemove, disabled = false, compact = false, onTranscribe, transcribingId = null }: Props) {
   const galleryId = useId();
   const titleId = `${galleryId}-preview-title`, imageListId = `${galleryId}-images`;
   const [expanded, setExpanded] = useState(false);
@@ -62,6 +63,9 @@ export function AttachmentGallery({ attachments, onRemove, disabled = false, com
         {attachment.role === 'voice' ? <div className="attachment-audio-icon"><Mic size={18}/><span>음성 피드백</span></div> : null}
         {caption(attachment)}
         {attachment.role === 'voice' ? <audio controls preload="none" src={attachment.mediaUrl} aria-label={`${attachment.name} 음성 재생`}/> : <a className="attachment-file-link" href={attachment.mediaUrl} target="_blank" rel="noreferrer">첨부 열기<ArrowUpRight size={13}/></a>}
+        {attachment.role === 'voice' && attachment.transcript?.text ? <blockquote className="attachment-transcript"><small><FileText size={12}/>자동 받아쓰기 · {attachment.transcript.engine} · 원본 음성과 대조 필요</small><p>{attachment.transcript.text}</p></blockquote> : null}
+        {attachment.role === 'voice' && attachment.transcript && !attachment.transcript.text ? <p className="attachment-transcript-empty">받아쓴 말이 없습니다. 음성을 직접 확인해 주세요.</p> : null}
+        {attachment.role === 'voice' && onTranscribe ? <button type="button" className="quiet attachment-transcribe" disabled={disabled || transcribingId !== null} onClick={() => void onTranscribe(attachment.id)}>{transcribingId === attachment.id ? <><LoaderCircle size={13} className="spinning"/>받아쓰는 중</> : attachment.transcript ? '다시 받아쓰기' : '로컬 받아쓰기'}</button> : null}
       </figure>)}
     </div> : null}
     {images.length > 0 || previewId !== null ? createPortal(<dialog ref={dialog} className="attachment-preview" aria-labelledby={titleId} onCancel={event => { event.preventDefault(); setPreviewId(null); }} onClose={() => { if (!dialog.current?.open) { setPreviewId(null); returnFocus(); } }} onClick={event => { if (event.target === event.currentTarget) setPreviewId(null); }} onKeyDown={event => {
