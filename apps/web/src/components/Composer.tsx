@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
-import { Paperclip, Mic, Square, Send, LoaderCircle, Clock3, Plus, ChevronUp, X, PencilLine } from 'lucide-react';
+import { Paperclip, Mic, Square, Send, LoaderCircle, Clock3, Brackets, Plus, ChevronUp, X, PencilLine } from 'lucide-react';
 import type { Attachment, Drawing } from '../../../../packages/core/types';
 import { time } from '../format';
 import { upload } from '../api';
@@ -125,8 +125,8 @@ export function Composer({ range, currentFrame, drawingContextFrame, drawings, b
     onSubmit={e => { e.preventDefault(); void submit(); }}>
     <input hidden type="file" multiple accept="image/png,image/jpeg,image/webp" ref={inputRef} onChange={event => { const files = Array.from(event.target.files ?? []); if (files.length) void attachFiles(files); event.target.value = ''; }}/>
     <div className="composer-context">
-      <span className="composer-time-chip"><Clock3 size={13}/><span>{hasVoice || pendingVoice ? '음성 기준' : '현재 시점'}</span><strong>{time(displayPoint ? displayedRange.in : displayedContextFrame)}</strong></span>
-      {!displayPoint ? <span className="composer-range-chip"><span>구간</span><strong>{time(displayedRange.in)} – {time(displayedRange.out)}</strong><button type="button" aria-label="선택 구간 해제" title="구간을 해제하고 현재 시점에 남기기" disabled={anchorLocked || !onClearRange && !onAnchorModeChange} onClick={() => onClearRange ? onClearRange() : onAnchorModeChange?.('point')}><X size={13}/></button></span> : <button type="button" className="composer-select-range" disabled={anchorLocked || !onAnchorModeChange} onClick={() => onAnchorModeChange?.('range')}>구간 지정</button>}
+      <span className="composer-time-chip"><Clock3 size={13} aria-hidden="true"/><span className="composer-anchor-label">{hasVoice || pendingVoice ? '음성 기준' : '현재 시점'}</span><strong>{time(displayPoint ? displayedRange.in : displayedContextFrame)}</strong></span>
+      {!displayPoint ? <span className="composer-range-chip" title="선택 구간 · 끝 시점은 포함하지 않음"><Brackets size={13} aria-hidden="true"/><span className="composer-anchor-label">구간</span><strong>{time(displayedRange.in)}<span className="composer-time-separator">–</span>{time(displayedRange.out)}</strong><button type="button" aria-label="선택 구간 해제" title="구간을 해제하고 현재 시점에 남기기" disabled={anchorLocked || !onClearRange && !onAnchorModeChange} onClick={() => onClearRange ? onClearRange() : onAnchorModeChange?.('point')}><X size={13}/></button></span> : <button type="button" className="composer-select-range" disabled={anchorLocked || !onAnchorModeChange} onClick={() => onAnchorModeChange?.('range')}>구간 지정</button>}
     </div>
     {drawings.length > 0 ? <div className="composer-drawing-context"><PencilLine size={12}/><span>그림 {drawings.length}개 · {drawingGroups.length}개 장면{drawingGroups.some(group => group.frame < displayedRange.in || group.frame >= displayedRange.out) ? ' · 다른 시점의 참고 그림 포함' : ''}</span></div> : null}
     <label className="composer-feedback-field"><textarea disabled={busy || saving} ref={textareaRef} aria-label={kind === 'note' ? '메모 내용' : '피드백 내용'} placeholder={kind === 'note' ? '이 장면에 기억해 둘 내용을 적어 주세요.' : '이 장면에서 바꾸고 싶은 내용을 적어 주세요.'} maxLength={5000} value={text} onFocus={() => onBeginWriting?.()} onChange={event => setText(event.target.value)} onKeyDown={event => { if (!event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229 && !event.repeat && (event.metaKey || event.ctrlKey) && event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); void submit(); } }}/></label>

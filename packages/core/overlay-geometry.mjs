@@ -1,4 +1,5 @@
 export const MAX_PEN_POINTS = 2000;
+export const MIN_DRAWING_SIZE_PX = 3;
 const clamp = (value, min = 0, max = 1) => Math.max(min, Math.min(max, Number.isFinite(value) ? value : min));
 const normalizedPoint = (point) => ({ x: clamp(point.x), y: clamp(point.y) });
 const isValidRegion = (region) => region && ['x', 'y', 'w', 'h'].every((key) => Number.isFinite(region[key])) && region.x >= 0 && region.y >= 0 && region.w >= 0 && region.h >= 0 && region.x + region.w <= 1.00001 && region.y + region.h <= 1.00001;
@@ -9,6 +10,32 @@ export function drawingBounds(drawing) {
   let left = 1, top = 1, right = 0, bottom = 0;
   for (const point of drawing.points) { left = Math.min(left, point.x); top = Math.min(top, point.y); right = Math.max(right, point.x); bottom = Math.max(bottom, point.y); }
   return { x: left, y: top, w: right - left, h: bottom - top };
+}
+
+/** Thin pen strokes resize only along their usable axis. The inclusive 3 CSS-pixel
+ * threshold matches the gesture minimum; zooming does not alter stored geometry. */
+export function drawingResizeHandles(drawing, width, height, bounds = drawingBounds(drawing)) {
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return [];
+  if (drawing.kind === 'line' || drawing.kind === 'arrow') {
+    const start = drawing.points[0], end = drawing.points.at(-1);
+    return start && end ? [{ id: 'start', ...start }, { id: 'end', ...end }] : [];
+  }
+  const left = bounds.x, right = left + bounds.w, top = bounds.y, bottom = top + bounds.h;
+  const centerX = (left + right) / 2, centerY = (top + bottom) / 2;
+  if (drawing.kind === 'pen') {
+    if (drawing.points.length <= 1) return [];
+    // Match isDrawableSize's floating-point tolerance at the exact pixel boundary.
+    const thinX = bounds.w * width <= MIN_DRAWING_SIZE_PX + 1e-6;
+    const thinY = bounds.h * height <= MIN_DRAWING_SIZE_PX + 1e-6;
+    if (thinX && thinY) return [];
+    if (thinY) return [{ id: 'w', x: left, y: centerY }, { id: 'e', x: right, y: centerY }];
+    if (thinX) return [{ id: 'n', x: centerX, y: top }, { id: 's', x: centerX, y: bottom }];
+  }
+  return [
+    { id: 'nw', x: left, y: top }, { id: 'n', x: centerX, y: top }, { id: 'ne', x: right, y: top },
+    { id: 'e', x: right, y: centerY }, { id: 'se', x: right, y: bottom }, { id: 's', x: centerX, y: bottom },
+    { id: 'sw', x: left, y: bottom }, { id: 'w', x: left, y: centerY },
+  ];
 }
 
 export function normalizeDrawing(drawing) {
@@ -67,14 +94,16 @@ export function resizeDrawing(drawing, handle, point, minimum = { w: 0.003, h: 0
   if (handle.includes('n')) top = clamp(point.y, 0, Math.max(0, bottom - minimum.h));
   if (handle.includes('s')) bottom = clamp(point.y, Math.min(1, top + minimum.h), 1);
   const width = right - left, height = bottom - top;
+  const resizeX = handle.includes('w') || handle.includes('e');
+  const resizeY = handle.includes('n') || handle.includes('s');
   const points = drawing.points.map((item) => ({
-    x: bounds.w > 1e-8 ? left + (item.x - bounds.x) / bounds.w * width : left + width / 2,
-    y: bounds.h > 1e-8 ? top + (item.y - bounds.y) / bounds.h * height : top + height / 2,
+    x: !resizeX ? item.x : bounds.w > 1e-8 ? left + (item.x - bounds.x) / bounds.w * width : left + width / 2,
+    y: !resizeY ? item.y : bounds.h > 1e-8 ? top + (item.y - bounds.y) / bounds.h * height : top + height / 2,
   }));
   return normalizeDrawing({ ...drawing, points, ...((drawing.kind === 'rect' || drawing.kind === 'ellipse') ? { region: { x: left, y: top, w: width, h: height } } : {}) });
 }
 
-export function isDrawableSize(drawing, width, height, minimumPixels = 3) {
+export function isDrawableSize(drawing, width, height, minimumPixels = MIN_DRAWING_SIZE_PX) {
   if (width <= 0 || height <= 0 || !drawing.points.length) return false;
   if (drawing.kind === 'pen' && drawing.points.length === 1) return true;
   if (drawing.points.length < 2) return false;

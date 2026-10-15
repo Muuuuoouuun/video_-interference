@@ -1,0 +1,15 @@
+.workspace-resizable { position: relative; }
+.workspace-resize-handle { display: none; }
+@media (min-width: 901px) {
+  .workspace-resize-handle { position: absolute; top: 0; bottom: 0; z-index: 12; display: flex; align-items: center; justify-content: center; width: 10px; cursor: col-resize; touch-action: none; user-select: none; }
+  .workspace-resize-project { left: var(--project-width); transform: translateX(-50%); }
+  .workspace-resize-feedback { right: var(--feedback-width); transform: translateX(50%); }
+  .workspace-resize-handle::before { content: ''; position: absolute; top: 0; bottom: 0; left: 4px; width: 2px; background: transparent; }
+  .workspace-resize-handle > span { position: relative; width: 3px; height: 32px; border-radius: 3px; background: #c5cbd4; }
+  .workspace-resize-handle:hover::before { background: #aeb9ca; }
+  .workspace-resize-handle:hover > span { background: #8a99b2; }
+  .workspace-resize-handle:focus-visible { outline: none; }
+  .workspace-resize-handle:focus-visible::before, .workspace-resize-handle[data-active="true"]::before { background: #8198c9; }
+  .workspace-resize-handle:focus-visible > span, .workspace-resize-handle[data-active="true"] > span { background: #4c6aa6; box-shadow: 0 0 0 2px var(--surface); }
+}
+body.vi-panel-resizing, body.vi-panel-resizing * { cursor: col-resize !important; user-select: none !important; }

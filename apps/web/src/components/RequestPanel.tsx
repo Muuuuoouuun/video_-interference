@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Check, Clock3, FileText, MessageSquare, SlidersHorizontal, Type, Volume2, X, Image, Scissors, RotateCcw, PencilLine, LoaderCircle, Trash2, Plus, ChevronUp, ChevronDown, Search, LayoutList, StickyNote, ArrowDownWideNarrow } from 'lucide-react';
+import { Check, Clock3, Brackets, FileText, MessageSquare, SlidersHorizontal, Type, Volume2, X, Image, Scissors, RotateCcw, PencilLine, LoaderCircle, Trash2, Plus, ChevronUp, ChevronDown, Search, LayoutList, StickyNote, ArrowDownWideNarrow } from 'lucide-react';
 import type { Attachment, Comment, EditOp, Region, Version } from '../../../../packages/core/types';
 import { projectComment } from '../../../../packages/core/comment-projection.mjs';
 import { selectFeedbackList } from '../../../../packages/core/feedback-list.mjs';
@@ -33,6 +33,7 @@ export const RequestPanel = memo(function RequestPanel({ headerActions, keyboard
   const [searchQuery, setSearchQuery] = useState('');
   const [sort, setSort] = useState<FeedbackSort>('timeline');
   const [pendingRevealId, setPendingRevealId] = useState<string|null>(null);
+  const [focusAfterAction, setFocusAfterAction] = useState<string[] | null>(null);
   const [commentDrafts, setCommentDrafts] = useState<Record<string, CommentDraft>>({});
   const [editingCommentId, setEditingCommentId] = useState<string|null>(null);
   const [savingCommentId, setSavingCommentId] = useState<string|null>(null);
@@ -58,14 +59,24 @@ export const RequestPanel = memo(function RequestPanel({ headerActions, keyboard
   const [contextBundles, setContextBundles] = useState<Record<string, { revision: string; result: PreparedContextBundle }>>({});
   const pendingSupplements = useMemo(() => comments.filter(comment => Boolean(supplementDrafts[comment.id]?.trim()) || savingSupplementId === comment.id), [comments, supplementDrafts, savingSupplementId]);
   const hasUnsavedSupplement = pendingSupplements.length > 0;
+  useEffect(() => {
+    if (!focusAfterAction || busy || savingCommentId || savingSupplementId || deletingCommentId) return;
+    const raf = requestAnimationFrame(() => {
+      const target = focusAfterAction.map(id => document.getElementById(id)).find(element => element instanceof HTMLButtonElement && !element.disabled);
+      (target ?? searchRef.current)?.focus({ preventScroll: true });
+      setFocusAfterAction(null);
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [focusAfterAction, busy, savingCommentId, savingSupplementId, deletingCommentId]);
   useEffect(() => { onDraftChange?.(hasUnsavedSupplement || pendingCommentEdits.length > 0); }, [hasUnsavedSupplement, pendingCommentEdits.length, onDraftChange]);
   useEffect(() => () => { onDraftChange?.(false); }, [onDraftChange]);
   useEffect(() => {
-    if (!resumeSupplementId || supplementing !== resumeSupplementId || filter !== 'all' || searchQuery) return;
+    if (!resumeSupplementId || supplementing !== resumeSupplementId) return;
     const raf = requestAnimationFrame(() => {
       const textarea = document.getElementById(`supplement-${resumeSupplementId}`);
-      textarea?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-      textarea?.focus({ preventScroll: true });
+      if (!textarea) return;
+      textarea.scrollIntoView({ block: 'nearest' });
+      textarea.focus({ preventScroll: true });
       setResumeSupplementId(null);
     });
     return () => cancelAnimationFrame(raf);
@@ -81,6 +92,11 @@ export const RequestPanel = memo(function RequestPanel({ headerActions, keyboard
     return () => cancelAnimationFrame(raf);
   }, [resumeCommentId, editingCommentId, filter, searchQuery]);
   const versionsById = useMemo(() => new Map(versions.map(version => [version.id, version])), [versions]);
+  const attachmentsByComment = useMemo(() => new Map(comments.map(comment => {
+    const linked = new Set(comment.attachmentIds);
+    if (comment.voiceAssetId) linked.add(comment.voiceAssetId);
+    return [comment.id, attachments.filter(attachment => linked.has(attachment.id))];
+  })), [comments, attachments]);
   const projections = useMemo(() => new Map(comments.map(comment => {
     const authored = versionsById.get(comment.versionId);
     return [comment.id, authored ? projectComment(comment, authored, currentVersion) : { status: 'unavailable' as const, ranges: [], contextFrame: null, contextStatus: 'unavailable' as const }];
@@ -163,7 +179,7 @@ export const RequestPanel = memo(function RequestPanel({ headerActions, keyboard
   function cancelCommentEdit(id: string) {
     if (commentInFlight.current) return;
     setEditingCommentId(null); setFailedCommentId(null);
-    requestAnimationFrame(() => document.getElementById(`edit-feedback-${id}`)?.focus({ preventScroll: true }));
+    setFocusAfterAction([`edit-feedback-${id}`]);
     setCommentDrafts(drafts => { const next = { ...drafts }; delete next[id]; return next; });
   }
   async function saveCommentEdit(comment: Comment) {
@@ -173,7 +189,7 @@ export const RequestPanel = memo(function RequestPanel({ headerActions, keyboard
     try {
       if (await onEditComment(comment.id, { text: draft.text, sceneDescription: draft.sceneDescription })) {
         setEditingCommentId(null); setSearchQuery(''); setFilter('all'); setPendingRevealId(comment.id);
-        requestAnimationFrame(() => document.getElementById(`edit-feedback-${comment.id}`)?.focus({ preventScroll: true }));
+        setFocusAfterAction([`edit-feedback-${comment.id}`]);
         setCommentDrafts(drafts => { const next = { ...drafts }; delete next[comment.id]; return next; });
       } else setFailedCommentId(comment.id);
     } catch { setFailedCommentId(comment.id); }
@@ -181,12 +197,17 @@ export const RequestPanel = memo(function RequestPanel({ headerActions, keyboard
   }
   async function deleteComment(comment: Comment) {
     if (busy || commentInFlight.current || savingSupplementId || supplementDrafts[comment.id]?.trim() || commentDrafts[comment.id] && isChangedDraft(commentDrafts[comment.id])) return;
+    const focusedBeforeDelete = document.activeElement;
+    const hadCardFocus = document.getElementById(`request-${comment.id}`)?.contains(focusedBeforeDelete);
+    const index = visible.findIndex(item => item.id === comment.id);
+    const neighbors = [visible[index + 1], visible[index - 1]].filter(Boolean).map(item => `locate-feedback-${item.id}`);
     commentInFlight.current = true; setDeletingCommentId(comment.id);
     try {
       if (await onDeleteComment(comment.id)) {
         if (editingCommentId === comment.id) setEditingCommentId(null);
         if (supplementing === comment.id) setSupplementing(null);
         setCommentDrafts(drafts => { const next = { ...drafts }; delete next[comment.id]; return next; });
+        if (hadCardFocus && (document.activeElement === focusedBeforeDelete || document.activeElement === document.body)) setFocusAfterAction(neighbors);
       }
     } finally { commentInFlight.current = false; setDeletingCommentId(null); }
   }
@@ -231,9 +252,11 @@ export const RequestPanel = memo(function RequestPanel({ headerActions, keyboard
     if (await onOp(op.id, { params, status: 'proposed' })) setEditing(null);
   }
   function cancelSupplement(id: string) {
+    if (supplementInFlight.current) return;
     setSupplementing(null);
     setFailedSupplementId(null);
     setSupplementDrafts(drafts => { const next = { ...drafts }; delete next[id]; return next; });
+    setFocusAfterAction([`supplement-feedback-${id}`]);
   }
   async function saveSupplement(comment: Comment, applied: boolean) {
     const text = supplementDrafts[comment.id]?.trim();
@@ -246,6 +269,7 @@ export const RequestPanel = memo(function RequestPanel({ headerActions, keyboard
         setSupplementing(null);
         setFilter('all'); setSearchQuery(''); setPendingRevealId(comment.id);
         setSupplementDrafts(drafts => { const next = { ...drafts }; delete next[comment.id]; return next; });
+        setFocusAfterAction([`supplement-feedback-${comment.id}`]);
       } else setFailedSupplementId(comment.id);
     } catch { setFailedSupplementId(comment.id); }
     finally { supplementInFlight.current = false; setSavingSupplementId(null); }
@@ -291,7 +315,22 @@ export const RequestPanel = memo(function RequestPanel({ headerActions, keyboard
         const index = numberById.get(comment.id)!;
         const showAuthoredPosition = differentVersion || !authored || projection.status !== 'present';
         return <article key={comment.id} id={`request-${comment.id}`} data-feedback-id={comment.id} className={`request-item ${selectedId === comment.id ? 'selected' : ''}`} tabIndex={0} aria-label={`피드백 ${index}`} onFocus={event => { if (event.target === event.currentTarget && !supplementBusy) selectFromList(comment); }}>
-          <button className="request-location rq-projected-location" disabled={supplementBusy} onClick={() => selectFromList(comment)} aria-label={`요청 ${index}, 현재 버전 v${currentVersion.number}, ${mappedLabel}`}><span className={`request-number ${related.some(op => op.status === 'approved' || op.status === 'applied') ? 'approved' : ''}`}>{index}</span><span className="rq-location-content"><span className="rq-current-version">현재 v{currentVersion.number}</span>{projection.status === 'deleted' || projection.status === 'unavailable' ? <span className={`rq-projection-message ${projection.status}`}>{mappedLabel}</span> : <span className="rq-projected-ranges">{projection.ranges.map((range, rangeIndex) => <span key={rangeIndex}>{rangeLabel(range.frameIn, range.frameOut)}</span>)}</span>}</span></button>
+          <div className="rq-card-heading">
+          <button id={`locate-feedback-${comment.id}`} className="request-location rq-projected-location" disabled={supplementBusy} onClick={() => selectFromList(comment)} aria-label={`요청 ${index}, 현재 버전 v${currentVersion.number}, ${mappedLabel}`}>
+            <span className={`request-number ${related.some(op => op.status === 'approved' || op.status === 'applied') ? 'approved' : ''}`}>{index}</span>
+            <span className="rq-location-content">
+              {projection.status === 'deleted' || projection.status === 'unavailable' ? <span className={`rq-projection-message ${projection.status}`}>{mappedLabel}</span> : <span className="rq-projected-ranges">{projection.ranges.map((range, rangeIndex) => {
+                const isPoint = range.frameOut - range.frameIn === 1;
+                return <span className="rq-time-range" key={rangeIndex} title={isPoint ? '피드백 시점' : '피드백 구간 · 끝 시점은 포함하지 않음'}>{isPoint ? <Clock3 size={13} aria-hidden="true"/> : <Brackets size={13} aria-hidden="true"/>}<span className="rq-time-value">{time(range.frameIn)}</span>{!isPoint ? <><span className="rq-time-separator" aria-hidden="true">–</span><span className="rq-time-value">{time(range.frameOut)}</span></> : null}</span>;
+              })}</span>}
+              <span className="rq-current-version">현재 v{currentVersion.number}</span>
+            </span>
+          </button>
+          <div className="rq-card-actions" role="group" aria-label={`피드백 ${index} 관리`}>
+            <button type="button" id={`edit-feedback-${comment.id}`} className="rq-card-action rq-edit-button" disabled={supplementBusy || hasApplied || isLayerChange || commentEditorOpen} onClick={() => startCommentEdit(comment)} aria-label={`피드백 ${index} 수정`} aria-keyshortcuts="F2" title={hasApplied || isLayerChange ? '이미 적용된 요청과 그래픽 변경은 새 피드백으로 남겨 주세요.' : '수정 · F2 또는 본문 두 번 클릭'}><PencilLine size={15} aria-hidden="true"/></button>
+            <button type="button" id={`delete-feedback-${comment.id}`} className="rq-card-action rq-delete-button" disabled={supplementBusy || unsavedEdit || unsavedSupplement} onClick={() => void deleteComment(comment)} aria-label={`피드백 ${index} 삭제`} aria-keyshortcuts="Shift+Delete" aria-busy={deletingCommentId === comment.id} title={unsavedEdit || unsavedSupplement ? '작성 중인 내용을 먼저 저장하거나 취소하세요.' : '삭제 · Shift + Delete · 삭제 후 되돌릴 수 있습니다.'}>{deletingCommentId === comment.id ? <LoaderCircle size={15} className="spinning" aria-hidden="true"/> : <Trash2 size={15} aria-hidden="true"/>}</button>
+          </div>
+          </div>
           {showAuthoredPosition || comment.updatedAt ? <div className="rq-authored-position">{showAuthoredPosition ? <span>{authored ? `작성 v${authored.number}` : '작성 버전 정보 없음'} · {rangeLabel(comment.frameIn, comment.frameOut)}</span> : null}{comment.updatedAt ? <span className="rq-edited-label" title={supplementTime(comment.updatedAt)}>수정됨</span> : null}{differentVersion ? <button className="quiet" disabled={supplementBusy || !authored} onClick={() => onSelectAuthored(comment)} title={!authored ? '작성 버전 정보를 찾을 수 없습니다.' : '요청을 작성한 버전과 원래 프레임을 엽니다.'}>{authored ? `작성 v${authored.number} 보기` : '작성 버전 보기'}</button> : null}</div> : null}
           {projection.status === 'partial' ? <p className="rq-projection-note">현재 버전에 표시할 수 있는 일부 구간만 보입니다.</p> : null}
           {projection.contextStatus === 'deleted' ? <p className="rq-projection-note">요청을 남긴 기준 장면은 삭제됨</p> : null}
@@ -310,7 +349,7 @@ export const RequestPanel = memo(function RequestPanel({ headerActions, keyboard
             <div className="rq-editor-footer"><span>⌘ / Ctrl + Enter 저장</span><div><button type="button" className="quiet" disabled={supplementBusy} onClick={() => cancelCommentEdit(comment.id)}>취소</button><button type="submit" className="outline-mint" disabled={supplementBusy || !canSaveEdit}>{savingCommentId === comment.id ? <LoaderCircle size={13} className="spinning"/> : <Check size={13}/>}수정 저장</button></div></div>
           </form>}
           {supplements.length > 0 ? <ol className="rq-supplement-history" aria-label={isNote ? '메모 보완 기록' : '추가 지시 기록'}>{supplements.map((supplement, supplementIndex) => <li key={supplement.id}><div><span>{isNote ? '메모 보완' : '추가 지시'} {supplementIndex + 1}</span><time dateTime={supplement.createdAt}>{supplementTime(supplement.createdAt)}</time></div><p>{supplement.text}</p></li>)}</ol> : null}
-          <AttachmentGallery compact attachments={attachments.filter(attachment => comment.attachmentIds.includes(attachment.id) || comment.voiceAssetId === attachment.id)}/>
+          <AttachmentGallery compact attachments={attachmentsByComment.get(comment.id)!}/>
           {comment.clarification ? <p className="clarification">{comment.clarification}</p> : null}
           {(editingMode || isLayerChange ? related : []).map(op => {
             const Icon = icons[op.type];
@@ -337,15 +376,15 @@ export const RequestPanel = memo(function RequestPanel({ headerActions, keyboard
             </div>;
           })}
           {editingMode && related.length > 0 && (unsavedEdit || unsavedSupplement) ? <p className="rq-comment-guidance">피드백 수정을 먼저 저장하거나 취소한 뒤 편집 명령을 변경하세요.</p> : null}
-          <div className="rq-comment-actions"><div className="rq-edit-actions"><button id={`edit-feedback-${comment.id}`} className="quiet rq-edit-button" disabled={supplementBusy || hasApplied || isLayerChange || commentEditorOpen} onClick={() => startCommentEdit(comment)} aria-label={`피드백 ${index} 수정`} title={hasApplied || isLayerChange ? '이미 적용된 요청과 그래픽 변경은 새 피드백으로 남겨 주세요.' : '피드백 수정 (F2)'}><PencilLine size={14}/>수정</button><button id={`delete-feedback-${comment.id}`} className="quiet rq-delete-button" disabled={supplementBusy || unsavedEdit || unsavedSupplement} onClick={() => void deleteComment(comment)} aria-label={`피드백 ${index} 삭제`} title={unsavedEdit || unsavedSupplement ? '작성 중인 내용을 먼저 저장하거나 취소하세요.' : '피드백 삭제 (Shift + Delete) · 삭제 후 되돌릴 수 있습니다.'}>{deletingCommentId === comment.id ? <LoaderCircle size={14} className="spinning"/> : <Trash2 size={14}/>}삭제</button></div>{!isLayerChange ? <button className="quiet rq-supplement-toggle" disabled={supplementBusy || hasApplied} aria-expanded={supplementing === comment.id} aria-controls={`supplement-form-${comment.id}`} onClick={() => { setSupplementing(comment.id); setFailedSupplementId(null); }} title={hasApplied ? '이미 적용된 요청입니다. 새 요청을 남겨 주세요.' : isNote ? '원문을 유지하고 메모를 덧붙입니다.' : '원문을 유지하고 편집 지시를 덧붙입니다.'}><Plus size={14}/>추가 지시</button> : null}
+          {!isLayerChange || editingMode ? <div className="rq-comment-actions">{!isLayerChange ? <button type="button" id={`supplement-feedback-${comment.id}`} className="quiet rq-supplement-toggle" disabled={supplementBusy || hasApplied} aria-expanded={supplementing === comment.id} aria-controls={supplementing === comment.id ? `supplement-form-${comment.id}` : undefined} onClick={() => { setSupplementing(comment.id); setFailedSupplementId(null); setResumeSupplementId(comment.id); }} title={hasApplied ? '이미 적용된 요청입니다. 새 요청을 남겨 주세요.' : isNote ? '원문을 유지하고 메모를 덧붙입니다.' : '원문을 유지하고 편집 지시를 덧붙입니다.'}><Plus size={14}/>{isNote ? '메모 추가' : '추가 지시'}</button> : null}
             {editingMode ? <button className="quiet" disabled={supplementBusy || unsavedSupplement || unsavedEdit || preparingBundleId !== null || !authored} onClick={() => void prepareContext(comment)} title={unsavedSupplement || unsavedEdit ? '작성 중인 내용을 먼저 저장한 뒤 자료를 준비하세요.' : '저장된 요청·그림·관련 장면·첨부를 이 PC에서 자료로 준비합니다. 외부 AI에 전송하지 않습니다.'}>{preparingBundleId === comment.id ? <LoaderCircle size={13} className="spinning"/> : <FileText size={13}/>}AI용 자료 준비</button> : null}
             {showInterpret ? <button className="outline-mint" disabled={supplementBusy || unsavedSupplement || unsavedEdit || hasApproved || hasApplied} onClick={() => void onInterpret(comment.id)} title={unsavedSupplement || unsavedEdit ? '작성 중인 내용을 먼저 저장한 뒤 해석하세요.' : hasApplied ? '적용된 요청은 다시 해석할 수 없습니다. 새 요청을 남겨 주세요.' : hasApproved ? '기존 승인을 취소하거나 지시를 보완한 뒤 해석하세요.' : '원문과 추가 지시를 함께 해석합니다.'}>요청 해석</button> : null}
-          </div>
+          </div> : null}
           {editingMode && bundle ? <div className="rq-context-bundle" role="status"><p>로컬 자료 준비됨 · 영상 {bundle.sceneCount}장 · 첨부 {bundle.attachmentCount}개</p><div>{bundle.archiveUrl ? <a className="quiet" href={bundle.archiveUrl} download>자료 묶음 받기</a> : null}<a className="quiet" href={bundle.manifestUrl} target="_blank" rel="noreferrer">자료 목록</a><span>외부 전송 없음</span></div></div> : null}
           {hasApplied ? <p className="rq-comment-guidance">{editingMode && related.some(op => op.type === 'overlay' || op.type === 'subtitle') ? '자막·그래픽 변경은 현재 버전의 ‘적용된 자막·그래픽’에서 요청하세요.' : '이미 적용된 요청입니다. 변경하려면 새 요청을 남겨 주세요.'}</p> : showInterpret && hasApproved ? <p className="rq-comment-guidance">승인된 명령이 있습니다. 승인을 취소하거나 지시를 보완한 뒤 다시 해석하세요.</p> : editingMode && supplements.length > 0 && !isNote && (comment.status === 'received' || related.length === 0) ? <p className="rq-comment-guidance">추가 지시가 저장되었습니다. 요청 해석을 눌러 편집 명령을 준비하세요.</p> : null}
           {!isLayerChange && supplementing === comment.id ? <form id={`supplement-form-${comment.id}`} className="rq-supplement-form" onSubmit={event => { event.preventDefault(); void saveSupplement(comment, hasApplied); }}>
             <label htmlFor={`supplement-${comment.id}`}>{isNote ? '메모 보완' : '피드백 보완'}</label>
-            <textarea id={`supplement-${comment.id}`} autoFocus aria-label={isNote ? '메모 보완 내용' : '추가 편집 지시 내용'} value={supplementDrafts[comment.id] ?? ''} maxLength={5000} disabled={supplementBusy || hasApplied} placeholder={isNote ? '기존 메모에 덧붙일 내용을 입력하세요.' : '어떤 부분을 어떻게 바꿀지 더 알려주세요.'} onChange={event => { const value = event.target.value; setSupplementDrafts(drafts => ({ ...drafts, [comment.id]: value })); setFailedSupplementId(null); }} onKeyDown={event => { if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return; if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); void saveSupplement(comment, hasApplied); } else if (event.key === 'Escape' && !supplementBusy) { event.preventDefault(); event.stopPropagation(); cancelSupplement(comment.id); } }} />
+            <textarea id={`supplement-${comment.id}`} aria-label={isNote ? '메모 보완 내용' : '추가 편집 지시 내용'} value={supplementDrafts[comment.id] ?? ''} maxLength={5000} disabled={supplementBusy || hasApplied} placeholder={isNote ? '기존 메모에 덧붙일 내용을 입력하세요.' : '어떤 부분을 어떻게 바꿀지 더 알려주세요.'} onChange={event => { const value = event.target.value; setSupplementDrafts(drafts => ({ ...drafts, [comment.id]: value })); setFailedSupplementId(null); }} onKeyDown={event => { if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return; if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); void saveSupplement(comment, hasApplied); } else if (event.key === 'Escape' && !supplementBusy) { event.preventDefault(); event.stopPropagation(); cancelSupplement(comment.id); } }} />
             {hasApproved ? <p className="rq-supplement-approval">추가 지시를 저장하면 이전 승인이 해제됩니다.</p> : null}
             {!hasApplied ? <p className="rq-supplement-help">{isNote ? '원문을 유지하고 보완 기록으로 저장합니다.' : editingMode ? '원문을 유지합니다. 저장 후 요청 해석을 눌러 주세요.' : '원문과 보완 내용을 함께 전달 자료에 담습니다.'}</p> : null}
             {failedSupplementId === comment.id ? <p className="rq-supplement-error" role="alert">보완 내용을 저장하지 못했습니다. 내용을 유지했으니 다시 시도해 주세요.</p> : null}

@@ -1,0 +1,6 @@
+.vi-timeline-seek-surface { position: relative; touch-action: none; user-select: none; cursor: crosshair; }
+.vi-timeline-seek-surface[data-disabled="true"], .vi-timeline-seek-surface[data-disabled="true"] .vi-timeline { cursor: default; }
+.vi-timeline-seek-surface > .vi-timeline-ruler:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+.vi-timeline-hover { position: absolute; inset: 0; pointer-events: none; z-index: 10; }
+.vi-timeline-hover-line { position: absolute; top: 27px; bottom: 0; width: 1px; border-left: 1px dashed #738198; box-shadow: 1px 0 #ffffff80; }
+.vi-timeline-hover-time { position: absolute; top: 0; transform: translateX(-50%); padding: 3px 6px; max-width: calc(100% - 8px); color: var(--text-secondary); background: var(--surface); border: 1px solid #bec7d4; border-radius: 4px; font: 11px/1.3 var(--time-font); font-variant-numeric: tabular-nums; white-space: nowrap; box-shadow: 0 1px 3px #202b4412; }

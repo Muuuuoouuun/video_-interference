@@ -25,7 +25,7 @@ function loadSprite(url: string, signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     const sprite = new Image();
     const cleanup = () => { sprite.onload = null; sprite.onerror = null; signal.removeEventListener('abort', abort); };
-    const abort = () => { cleanup(); reject(new DOMException('장면 미리보기 요청 취소', 'AbortError')); };
+    const abort = () => { cleanup(); sprite.removeAttribute('src'); reject(new DOMException('장면 미리보기 요청 취소', 'AbortError')); };
     if (signal.aborted) { abort(); return; }
     signal.addEventListener('abort', abort, { once: true });
     sprite.onload = () => { cleanup(); resolve(); };
@@ -34,27 +34,31 @@ function loadSprite(url: string, signal: AbortSignal): Promise<void> {
   });
 }
 
-export const TimelineFilmstrip = memo(function TimelineFilmstrip({ version }: { version: Version }) {
-  const [result, setResult] = useState<Filmstrip | null>(null);
-  const [error, setError] = useState('');
+export const TimelineFilmstrip = memo(function TimelineFilmstrip({ version, enabled = true }: { version: Version; enabled?: boolean }) {
+  const [loaded, setLoaded] = useState<{ key: string; strip: Filmstrip | null; error: string } | null>(null);
   const [attempt, setAttempt] = useState(0);
+  const key = JSON.stringify([version.id, version.durationFrames, version.mediaUrl]);
+  const strip = loaded?.key === key ? loaded.strip : null;
+  const error = loaded?.key === key ? loaded.error : '';
 
   useEffect(() => {
+    // The compact timeline never needs thumbnails. Keep a completed strip for
+    // immediate expansion, but defer requests until the strip is visible.
+    if (!enabled || strip) return;
     const controller = new AbortController();
-    setResult(null); setError('');
+    setLoaded({ key, strip: null, error: '' });
     void (async () => {
       const response = await fetch(`/api/versions/${encodeURIComponent(version.id)}/filmstrip`, { signal: controller.signal });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || '장면 미리보기를 준비하지 못했습니다.');
       if (!validFilmstrip(body, version)) throw new Error('현재 버전의 장면 미리보기를 확인하지 못했습니다.');
       await loadSprite(body.imageUrl, controller.signal);
-      if (!controller.signal.aborted) setResult(body);
-    })().catch(error => { if (!controller.signal.aborted) setError(error instanceof Error ? error.message : '장면 미리보기를 준비하지 못했습니다.'); });
+      if (!controller.signal.aborted) setLoaded({ key, strip: body, error: '' });
+    })().catch(error => { if (!controller.signal.aborted) setLoaded({ key, strip: null, error: error instanceof Error ? error.message : '장면 미리보기를 준비하지 못했습니다.' }); });
     return () => controller.abort();
-  }, [version.id, version.durationFrames, version.mediaUrl, attempt]);
+  }, [key, enabled, strip, attempt]);
 
-  const strip = result?.versionId === version.id && result.durationFrames === version.durationFrames ? result : null;
-  return <div className="vi-filmstrip" aria-label={`v${version.number} 실제 장면 미리보기`} aria-busy={!strip && !error}>
+  return <div className="vi-filmstrip" hidden={!enabled} aria-label={`v${version.number} 실제 장면 미리보기`} aria-busy={enabled && !strip && !error}>
     {strip ? <div className="vi-filmstrip-cells" aria-hidden="true" style={{ gridTemplateColumns: `repeat(${strip.frames.length}, minmax(0, 1fr))` }}>
       {strip.frames.map((frame, index) => <svg key={frame} viewBox={`${index * strip.cellWidth} 0 ${strip.cellWidth} ${strip.cellHeight}`} preserveAspectRatio="xMidYMid slice" focusable="false">
         <image href={strip.imageUrl} width={strip.cellWidth * strip.frames.length} height={strip.cellHeight} />

@@ -1,0 +1,28 @@
+.vi-marker-rail { position: relative; height: 34px; margin: 3px 0 4px; z-index: 9; }
+.vi-marker-rail .vi-comment-marker { position: absolute; top: 0; z-index: 1; transform: translateX(-50%); height: 28px; min-width: 0; padding: 0 4px; gap: 3px; display: inline-flex; align-items: center; justify-content: center; color: var(--text-secondary); background: var(--surface); border: 1px solid #aeb7c5; border-radius: 6px; font-size: 11px; font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums; cursor: pointer; transition: background-color .12s, border-color .12s; }
+.vi-marker-rail .vi-comment-marker::after { content: ''; position: absolute; top: calc(100% + 1px); left: var(--marker-stem, 50%); height: 5px; width: 1px; background: #aeb7c5; pointer-events: none; }
+.vi-marker-rail .vi-comment-marker:hover:not(:disabled) { color: var(--text); background: var(--surface-muted); border-color: #78869b; z-index: 2; }
+.vi-marker-rail .vi-comment-marker.vi-comment-selected, .vi-marker-rail .vi-comment-marker[aria-expanded="true"] { color: #3154aa; background: #edf2ff; border-color: #7590ce; box-shadow: inset 0 -2px #7590ce; z-index: 3; }
+.vi-marker-rail .vi-comment-selected::after { background: #7590ce; }
+.vi-marker-rail .vi-comment-marker:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; z-index: 4; }
+.vi-marker-rail .vi-comment-marker:disabled { cursor: default; opacity: .55; }
+.vi-marker-count { font-size: 10px; color: var(--muted); font-weight: 500; }
+.vi-marker-picker { position: fixed; z-index: 1000; display: flex; flex-direction: column; box-sizing: border-box; width: min(280px, calc(100vw - 16px)); max-width: calc(100vw - 16px); padding: 6px; overflow: hidden; color: var(--text); background: var(--surface); border: 1px solid var(--border-strong); border-radius: 10px; box-shadow: 0 6px 24px #202b441c; }
+.vi-marker-picker button { cursor: pointer; }
+.vi-marker-picker button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.vi-marker-picker-heading { display: flex; flex-shrink: 0; justify-content: space-between; align-items: center; padding: 1px 3px 6px 7px; color: var(--muted); font-size: 11px; }
+.vi-marker-picker-heading strong { margin-left: 4px; color: var(--text-secondary); font-variant-numeric: tabular-nums; font-weight: 600; }
+.vi-marker-picker-heading > button { display: flex; align-items: center; justify-content: center; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 5px; color: var(--muted); background: transparent; }
+.vi-marker-picker-heading > button:hover { color: var(--text); background: var(--surface-muted); }
+.vi-marker-choices { min-height: 0; max-height: 200px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.vi-marker-choices > button { display: flex; align-items: flex-start; gap: 9px; width: 100%; min-width: 0; padding: 8px 6px; border: 1px solid transparent; border-radius: 6px; text-align: left; color: var(--text-secondary); background: transparent; }
+.vi-marker-choices > button:hover, .vi-marker-choices > button:focus-visible { background: var(--surface-muted); }
+.vi-marker-choices > button[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent-border); }
+.vi-marker-choices > button:focus-visible { outline-offset: -2px; }
+.vi-picker-number { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; min-width: 22px; height: 22px; padding: 0 3px; color: var(--text-secondary); background: var(--surface); border: 1px solid #b9c1cd; border-radius: 5px; font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.vi-picker-copy { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.vi-picker-time { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; font-size: 11px; font-family: var(--time-font); font-variant-numeric: tabular-nums; line-height: 1.5; }
+.vi-picker-time > svg { flex-shrink: 0; color: var(--muted); }
+.vi-picker-time small { color: var(--muted); font-family: inherit; font-size: 10px; }
+.vi-picker-summary { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; line-height: 1.5; }
+@media (prefers-reduced-motion: reduce) { .vi-marker-rail .vi-comment-marker { transition: none; } }

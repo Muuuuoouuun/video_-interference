@@ -1,4 +1,4 @@
-import { useId, useLayoutEffect, useRef, useState } from 'react';
+import { memo, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ArrowUpRight, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Image, Mic, X, ZoomIn } from 'lucide-react';
 import type { Attachment } from '../../../../packages/core/types';
@@ -8,7 +8,7 @@ interface Props { attachments: Attachment[]; onRemove?: (id: string) => void; di
 const roleLabels = { reference: '참고 이미지', insert: '영상 삽입', voice: '음성 피드백' };
 
 /** Same attachment treatment while composing and reviewing saved feedback. */
-export function AttachmentGallery({ attachments, onRemove, disabled = false, compact = false }: Props) {
+export const AttachmentGallery = memo(function AttachmentGallery({ attachments, onRemove, disabled = false, compact = false }: Props) {
   const galleryId = useId();
   const titleId = `${galleryId}-preview-title`, imageListId = `${galleryId}-images`;
   const [expanded, setExpanded] = useState(false);
@@ -74,4 +74,4 @@ export function AttachmentGallery({ attachments, onRemove, disabled = false, com
         <footer><nav className="attachment-preview-navigation" aria-label="이미지 이동"><button type="button" className="quiet" aria-label="이전 이미지" title="이전 이미지 (←)" disabled={previewIndex === 0} onClick={() => movePreview(-1)}><ChevronLeft size={18}/></button><span aria-live="polite">{previewIndex + 1}<small> / {images.length}</small></span><button type="button" className="quiet" aria-label="다음 이미지" title="다음 이미지 (→)" disabled={previewIndex === images.length - 1} onClick={() => movePreview(1)}><ChevronRight size={18}/></button></nav><span className="attachment-preview-help">← → 이동 · Esc 닫기</span><a href={preview.mediaUrl} target="_blank" rel="noreferrer">원본 크기로 열기<ArrowUpRight size={14}/></a></footer></> : null}
     </dialog>, document.body) : null}
   </>;
-}
+});

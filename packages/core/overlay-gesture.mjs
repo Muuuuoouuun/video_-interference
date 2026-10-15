@@ -1,4 +1,4 @@
-import { MAX_PEN_POINTS, createDrawing, decimatePoints, drawingBounds, normalizeDrawing, resizeDrawing, translateDrawing } from './overlay-geometry.mjs';
+import { MAX_PEN_POINTS, MIN_DRAWING_SIZE_PX, createDrawing, decimatePoints, drawingBounds, normalizeDrawing, resizeDrawing, translateDrawing } from './overlay-geometry.mjs';
 
 /** Buffer pointer samples separately from geometry work. Call flush at most once per display frame. */
 export function createOverlayGesture({ kind, original, start, width, height, handle }) {
@@ -29,7 +29,7 @@ export function createOverlayGesture({ kind, original, start, width, height, han
     if (!dirty) return preview;
     if (kind === 'move') preview = translateDrawing(original, latest.x - start.x, latest.y - start.y);
     else if (kind === 'resize') preview = latest.x === start.x && latest.y === start.y ? original :
-      resizeDrawing(original, handle, { x: latest.x + resizeOffset.x, y: latest.y + resizeOffset.y }, { w: 3 / width, h: 3 / height });
+      resizeDrawing(original, handle, { x: latest.x + resizeOffset.x, y: latest.y + resizeOffset.y }, { w: MIN_DRAWING_SIZE_PX / width, h: MIN_DRAWING_SIZE_PX / height });
     else if (newPen) preview = { ...original, points: penPoints.slice() };
     else preview = { ...original, ...createDrawing(original.kind, start, latest, original, original.id) };
     dirty = false;

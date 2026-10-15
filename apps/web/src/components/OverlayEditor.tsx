@@ -3,7 +3,7 @@ import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { ArrowUpRight, Circle, CornerUpLeft, CornerUpRight, Eraser, MousePointer2, Pencil, Plus, RotateCcw, Slash, Square, Trash2 } from 'lucide-react';
 import type { Drawing, Point } from '../../../../packages/core/types';
-import { arrowHeadPoints, createDrawing, drawingBounds, isDrawableSize, normalizeDrawing, translateDrawing } from '../../../../packages/core/overlay-geometry.mjs';
+import { arrowHeadPoints, createDrawing, drawingBounds, drawingResizeHandles, isDrawableSize, normalizeDrawing, translateDrawing } from '../../../../packages/core/overlay-geometry.mjs';
 import type { DrawingHandle, DrawingStyle } from '../../../../packages/core/overlay-geometry.mjs';
 import { createOverlayGesture } from '../../../../packages/core/overlay-gesture.mjs';
 import type { OverlayGesture } from '../../../../packages/core/overlay-gesture.mjs';
@@ -83,20 +83,8 @@ function SelectionHandles({ drawing, logicalHeight, viewport }: { drawing: Drawi
     const point = drawing.points[0];
     return <circle cx={point.x * 1000} cy={point.y * logicalHeight} r={Math.max((drawing.strokeWidth ?? 3) / 2 + 3 * pixel, 6 * pixel)} fill="none" stroke="#bcf7de" strokeWidth="1" vectorEffect="non-scaling-stroke" pointerEvents="none" />;
   }
-  let handles: { id: DrawingHandle; x: number; y: number }[];
   const bounds = drawingBounds(drawing);
-  if (drawing.kind === 'line' || drawing.kind === 'arrow') {
-    const first = drawing.points[0], last = drawing.points.at(-1);
-    if (!first || !last) return null;
-    handles = [{ id: 'start', x: first.x, y: first.y }, { id: 'end', x: last.x, y: last.y }];
-  } else {
-    const left = bounds.x, right = bounds.x + bounds.w, top = bounds.y, bottom = bounds.y + bounds.h;
-    handles = [
-      { id: 'nw', x: left, y: top }, { id: 'n', x: (left + right) / 2, y: top }, { id: 'ne', x: right, y: top },
-      { id: 'e', x: right, y: (top + bottom) / 2 }, { id: 'se', x: right, y: bottom }, { id: 's', x: (left + right) / 2, y: bottom },
-      { id: 'sw', x: left, y: bottom }, { id: 'w', x: left, y: (top + bottom) / 2 },
-    ];
-  }
+  const handles = drawingResizeHandles(drawing, viewport.width, viewport.height, bounds);
   return <g className="oe-selection">
     <rect x={bounds.x * 1000} y={bounds.y * logicalHeight} width={bounds.w * 1000} height={bounds.h * logicalHeight} fill="none" stroke="#bcf7de" strokeWidth="1" strokeDasharray="4 3" vectorEffect="non-scaling-stroke" pointerEvents="none" />
     {handles.map((handle) => <g key={handle.id} data-handle={handle.id} className={`oe-handle oe-handle-${handle.id}`}>

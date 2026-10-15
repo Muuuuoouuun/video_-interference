@@ -43,8 +43,6 @@
 .vi-range-selection { position: absolute; top: -1px; bottom: -1px; background: rgb(127 230 192 / 19%); border: 2px solid #bcf7de; pointer-events: none; }
 .vi-playhead { position: absolute; width: 1px; height: calc(100% + 31px); top: -19px; background: #eef1f3; z-index: 5; pointer-events: none; }
 .vi-playhead > span { position: absolute; top: -1px; left: -5px; width: 11px; height: 11px; background: #bcf7de; clip-path: polygon(0 0, 100% 0, 100% 55%, 50% 100%, 0 55%); }
-.vi-comment-marker { position: absolute; top: -2px; transform: translate(-50%, -50%); z-index: 6; min-width: 17px; height: 17px; padding: 0 3px; display: flex; align-items: center; justify-content: center; background: #d4dbe0; color: #131719; border: 1px solid #1d2926; border-radius: 50%; font-size: 10px; font-weight: 650; cursor: pointer; }
-.vi-comment-marker.vi-comment-selected { background: #bcf7de; border-color: #bcf7de; }
 .vi-range-handle { position: absolute; width: 13px; height: calc(100% + 8px); top: -4px; transform: translateX(-50%); z-index: 7; border: 0; background: transparent; padding: 0; cursor: ew-resize; touch-action: none; }
 .vi-range-handle::before { content: ''; display: block; height: 100%; width: 4px; background: #bcf7de; margin: 0 auto; border-radius: 1px; }
 .vi-range-handle::after { content: ''; position: absolute; left: 5px; top: 40%; width: 1px; height: 12px; background: #547364; }
