@@ -1,0 +1,15 @@
+node_modules/
+dist/
+storage/
+.env
+.env.*
+!.env.example
+.DS_Store
+fixtures/demo.mp4
+
+# Local source-video stills and review mockups containing those stills.
+apps/web/public/sample-frame.jpg
+design/editor-draft.png
+design/editor-concept.png
+
+._*

@@ -1,0 +1,23 @@
+.video-start { min-height: 100dvh; color: #dfe9e4; background: #101517; }
+.video-start-header { height: 70px; display: flex; align-items: center; justify-content: space-between; padding: 0 38px; border-bottom: 1px solid #263331; }
+.video-start-header > span:last-child { display: flex; align-items: center; gap: 7px; font-size: 12px; color: #91aaa0; }
+.video-start-main { width: min(1120px, 100%); margin: 0 auto; padding: 54px 42px 32px; }
+.video-start-intro h1 { margin: 0 0 16px; font-size: 38px; font-weight: 650; line-height: 1.3; letter-spacing: -.035em; color: #edf5ef; }
+.video-start-intro p { color: #97ada2; font-size: 15px; line-height: 1.85; }
+.video-start-dropzone { display: flex; align-items: center; gap: 22px; margin-top: 30px; padding: 28px; border: 1px dashed #527160; border-radius: 13px; background: #17241d; transition: border-color .15s, background .15s; }
+.video-start-dropzone.video-start-dragging { border-color: var(--mint); background: #243e2f; box-shadow: inset 0 0 0 1px var(--mint); }
+.video-start-file-icon { width: 66px; height: 66px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; color: var(--mint); border: 1px solid #355343; border-radius: 12px; background: #1c3025; }
+.video-start-drop-copy { flex: 1; min-width: 0; }
+.video-start-drop-copy h2 { color: #dcefe2; font-size: 17px; font-weight: 600; margin-bottom: 8px; }
+.video-start-drop-copy p { font-size: 13px; line-height: 1.7; color: #a6bbaf; }
+.video-start-drop-copy small { display: block; margin-top: 9px; font-size: 11px; line-height: 1.6; color: #7f9d8b; }
+.video-start-open { flex-shrink: 0; min-height: 44px; padding: 10px 19px; }
+.video-start-error { margin-top: 14px; padding: 13px 16px; background: #332426; border: 1px solid #745150; border-radius: 8px; color: #e8bcb5; font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+.video-start-steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; margin: 30px 0 0; padding: 0; list-style: none; }
+.video-start-steps li { display: flex; align-items: flex-start; gap: 12px; padding: 18px 0; }
+.video-start-step-number { margin-top: 1px; color: #547967; font-size: 11px; font-variant-numeric: tabular-nums; }
+.video-start-steps strong { display: flex; align-items: center; gap: 8px; color: #ccded2; font-size: 13px; font-weight: 550; }
+.video-start-steps strong svg { color: #99bca8; }
+.video-start-steps p { margin-top: 10px; color: #819b8c; font-size: 12px; line-height: 1.8; }
+.video-start-local { display: flex; align-items: center; gap: 8px; margin-top: 15px; padding-top: 19px; border-top: 1px solid #293a31; color: #7f9b8b; font-size: 11px; line-height: 1.7; }
+.video-start-local svg { flex-shrink: 0; }

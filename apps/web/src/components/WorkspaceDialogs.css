@@ -1,0 +1,22 @@
+.workspace-dialog { color: #e1eae5; width: min(650px, 92vw); max-height: 86dvh; padding: 0; border: 1px solid #415148; border-radius: 12px; background: #161d19; box-shadow: 0 24px 100px #0009; }
+.workspace-dialog::backdrop { background: #080c0bd0; }
+.workspace-dialog > header { display: flex; justify-content: space-between; align-items: center; padding: 20px 24px 14px; }
+.workspace-dialog h2 { display: flex; align-items: center; gap: 10px; font-size: 18px; font-weight: 600; }
+.workspace-dialog h2 > span { font-size: 13px; color: #9eb8a9; }
+.workspace-dialog-intro { padding: 0 24px 16px; font-size: 12px; line-height: 1.7; color: #9fb4a8; }
+.workspace-dialog > footer { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 16px 24px; border-top: 1px solid #303c34; font-size: 11px; color: #9fb4a8; }
+.shortcut-groups { padding: 0 24px 16px; }
+.shortcut-groups h3 { margin: 14px 0 10px; font-size: 12px; color: var(--mint); font-weight: 550; }
+.shortcut-groups dl { margin: 0; }
+.shortcut-groups dl > div { display: flex; justify-content: space-between; align-items: center; gap: 20px; padding: 7px 0; font-size: 12px; border-bottom: 1px solid #253129; }
+.shortcut-groups dd { margin: 0; flex-shrink: 0; }
+.workspace-dialog kbd { font: inherit; font-size: 11px; border: 1px solid #3b4b40; background: #232e27; color: #c4d7cb; border-radius: 4px; padding: 3px 6px; }
+.trash-items { padding: 0 24px 20px; }
+.trash-items article { display: flex; align-items: center; gap: 16px; padding: 16px 0; border-top: 1px solid #303c34; }
+.trash-items article > div { flex: 1; min-width: 0; }
+.trash-items time { font-size: 12px; color: var(--mint); font-variant-numeric: tabular-nums; }
+.trash-items p { font-size: 13px; line-height: 1.6; margin: 7px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.trash-items small { font-size: 11px; color: #90a79a; }
+.trash-empty { padding: 40px 10px; text-align: center; color: #9aae9f; }
+.feedback .feedback-undo { white-space: nowrap; color: var(--mint); border-bottom: 1px solid #7aa58b; padding: 3px 0; }
+.status-bar .shortcut-trigger { display: flex; align-items: center; gap: 5px; font-size: 11px; color: #afc1b7; }

@@ -1,0 +1,15 @@
+.saved-request-context { margin-top: 16px; padding: 14px; border: 1px solid #425d50; border-radius: 7px; background: #1a2721; }
+.saved-request-context strong, .draft-heading { color: #bcf7de; font-size: 12px; font-weight: 500; }
+.saved-request-context p { margin: 8px 0 12px; color: #a7b7ad; font-size: 11px; line-height: 1.6; }
+.saved-request-context > div { display: flex; flex-wrap: wrap; gap: 8px; }
+.draft-heading { margin-top: 16px; }
+.vi-range-fields input:disabled, .vi-range-fields button:disabled { opacity: .55; cursor: default; }
+.vi-range-handle:disabled { opacity: .6; cursor: default; }
+.request-range-options { margin-bottom: 10px; }
+.request-range-options button { border: 1px solid #3c4e44; padding: 6px 8px; font-size: 11px; }
+.request-range-options button[aria-pressed="true"] { color: #bcf7de; border-color: #8bb7a1; background: #293f33; }
+.saved-request-context .request-anchor-missing { color: #d4bd87; }
+.vi-missing-range { padding: 12px 0; color: #c3af83; font-size: 12px; line-height: 1.5; }
+.saved-request-context .request-drawing-copies { margin-top: 10px; max-height: 180px; overflow-y: auto; }
+.request-drawing-copies p { flex-basis: 100%; margin: 0 0 2px; }
+.request-drawing-copies button { padding: 6px 8px; border: 1px solid #425d50; font-size: 11px; }
