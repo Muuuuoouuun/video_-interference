@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readFile, writeFile, copyFile, stat, rename, rm, readdi
 import { join } from 'node:path';
 import sharp from 'sharp';
 import { ffmpegPath, run } from './engine.mjs';
+import { planCanonicalFrameDecode } from './canonical-frames.mjs';
 import { planRequestContextFrames } from './context-bundle.mjs';
 import { drawingsSvg } from './drawings.mjs';
 import { projectComment } from '../../packages/core/comment-projection.mjs';
@@ -142,8 +143,8 @@ export async function prepareFeedbackExport({ state, targetVersionId, commentIds
     let versionIndex = 0;
     for (const [versionId, group] of sourceGroups) {
       abort(signal); const folder = `scenes/version-${String(++versionIndex).padStart(3, '0')}`; await mkdir(join(work, folder), { recursive: true });
-      const frames = [...group.frames].sort((a, b) => a - b), select = frames.map(frame => `eq(n\\,${frame})`).join('+');
-      await run(ffmpegPath, ['-y', '-hide_banner', '-loglevel', 'error', '-threads', '1', '-i', group.videoPath, '-map', '0:v:0', '-an', '-sn', '-dn', '-vf', `select=${select},scale=w='min(960,iw)':h='min(960,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1`, '-fps_mode', 'vfr', '-frames:v', String(frames.length), '-q:v', '2', '-start_number', '0', '-threads', '1', join(work, folder, '%06d.jpg')], { signal, timeout: 120_000 }); ffmpegRuns++;
+      const frames = [...group.frames].sort((a, b) => a - b), decode = planCanonicalFrameDecode(frames);
+      await run(ffmpegPath, ['-y', '-hide_banner', '-loglevel', 'error', '-threads', '1', ...decode.inputArgs, '-i', group.videoPath, '-map', '0:v:0', '-an', '-sn', '-dn', '-vf', `select=${decode.select},scale=w='min(960,iw)':h='min(960,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1`, '-fps_mode', 'vfr', '-frames:v', String(frames.length), '-q:v', '2', '-start_number', '0', '-threads', '1', join(work, folder, '%06d.jpg')], { signal, timeout: 120_000 }); ffmpegRuns++;
       const actual = (await readdir(join(work, folder))).filter(name => /^\d{6}\.jpg$/.test(name)); if (actual.length !== frames.length) throw fail('작성 버전 길이와 스틸 개수가 맞지 않습니다. 자료는 생략하지 않았습니다.', 409);
       for (let index = 0; index < frames.length; index++) {
         const file = `${folder}/frame-${String(frames[index]).padStart(6, '0')}.jpg`;

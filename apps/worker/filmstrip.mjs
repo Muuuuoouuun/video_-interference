@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readFile, writeFile, stat, rename, rm, readdir } from '
 import { join, resolve } from 'node:path';
 import sharp from 'sharp';
 import { ffmpegPath, run } from './engine.mjs';
+import { planCanonicalFrameDecode } from './canonical-frames.mjs';
 
 const CELL_WIDTH = 160, CELL_HEIGHT = 90, RENDERER = 'filmstrip-v1';
 const failure = (message, status = 400) => Object.assign(new Error(message), { status });
@@ -53,9 +54,9 @@ export async function prepareFilmstrip(options) {
   await mkdir(directory, { recursive: true });
   const work = await mkdtemp(join(directory, '.filmstrip-')), started = performance.now();
   try {
-    const select = info.frames.map(frame => `eq(n\\,${frame})`).join('+');
-    const filter = `select=${select},scale=${CELL_WIDTH}:${CELL_HEIGHT}:force_original_aspect_ratio=decrease:force_divisible_by=2,pad=${CELL_WIDTH}:${CELL_HEIGHT}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1`;
-    await run(ffmpegPath, ['-y', '-hide_banner', '-loglevel', 'error', '-threads', '1', '-i', videoPath, '-map', '0:v:0', '-an', '-sn', '-dn', '-vf', filter, '-fps_mode', 'vfr', '-frames:v', String(info.frames.length), '-start_number', '0', '-threads', '1', join(work, '%02d.png')], { signal, timeout: 120_000 });
+    const decode = planCanonicalFrameDecode(info.frames);
+    const filter = `select=${decode.select},scale=${CELL_WIDTH}:${CELL_HEIGHT}:force_original_aspect_ratio=decrease:force_divisible_by=2,pad=${CELL_WIDTH}:${CELL_HEIGHT}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1`;
+    await run(ffmpegPath, ['-y', '-hide_banner', '-loglevel', 'error', '-threads', '1', ...decode.inputArgs, '-i', videoPath, '-map', '0:v:0', '-an', '-sn', '-dn', '-vf', filter, '-fps_mode', 'vfr', '-frames:v', String(info.frames.length), '-start_number', '0', '-threads', '1', join(work, '%02d.png')], { signal, timeout: 120_000 });
     abort(signal);
     const cells = (await readdir(work)).filter(name => /^\d{2}\.png$/.test(name)).sort();
     if (cells.length !== info.frames.length) throw failure('버전 길이와 실제 영상 프레임이 맞지 않아 시간축 썸네일을 만들지 못했습니다.', 409);

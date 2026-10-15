@@ -40,6 +40,22 @@ await test('loopback API preserves approvals, versions, media boundaries and imp
   const note = (await request('/api/comments', 'POST', { versionId: state.versions[0].id, frameIn: 0, frameOut: 30, kind: 'note', text: '2배속으로 바꾸고 그림을 영상에 넣어' })).value;
   assert.equal(note.kind, 'note'); assert.equal((await request(`/api/comments/${note.id}/interpret`, 'POST', {})).response.status, 409);
   assert.equal((await request('/api/state')).value.ops.filter(item => item.commentId === note.id).length, 0, 'stored notes do not silently create executable operations');
+  const koreanPatch = { text: '후반 장면의 한글 피드백 🎬', sceneDescription: '정확한 시점의 장면' };
+  const patchBytes = Buffer.from(JSON.stringify(koreanPatch)), split = patchBytes.indexOf(Buffer.from('후')) + 1;
+  const chunked = await new Promise((resolve, reject) => {
+    const req = http.request(`${base}/api/comments/${note.id}`, { method: 'PATCH', headers: { 'content-type': 'application/json' } }, res => {
+      const chunks = []; res.on('data', chunk => chunks.push(chunk));
+      res.on('end', () => { try { resolve({ status: res.statusCode, value: JSON.parse(Buffer.concat(chunks)) }); } catch (error) { reject(error); } });
+      res.on('error', reject);
+    });
+    req.on('error', reject); req.setNoDelay(true); req.write(patchBytes.subarray(0, split));
+    setTimeout(() => req.end(patchBytes.subarray(split)), 20);
+  });
+  assert.equal(chunked.status, 200); assert.equal(chunked.value.text, koreanPatch.text);
+  assert.equal((await request('/api/state')).value.comments.find(item => item.id === note.id).sceneDescription, koreanPatch.sceneDescription);
+  const koreanDb = new DatabaseSync(join(storage, 'project.sqlite'), { readOnly: true });
+  try { assert.equal(JSON.parse(koreanDb.prepare('SELECT data FROM workspace WHERE id = 1').get().data).state.comments.find(item => item.id === note.id).text, koreanPatch.text, 'split Korean bytes persist intact in SQLite'); }
+  finally { koreanDb.close(); }
   assert.equal((await request('/api/comments', 'POST', { versionId: state.versions[0].id, frameIn: 0, frameOut: 30, kind: 'unknown', text: 'invalid kind' })).response.status, 400);
   const original = state.versions[0], speed = state.ops.find(op => op.type === 'speed');
   const unapproved = await request('/api/render', 'POST', { parentVersionId: original.id, opIds: [speed.id] }); assert.equal(unapproved.response.status, 400);

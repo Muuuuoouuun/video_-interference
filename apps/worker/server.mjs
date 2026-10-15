@@ -7,6 +7,7 @@ import { Transform } from 'node:stream';
 import { dirname, join, resolve, extname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
+import { readJsonBody as bodyJson } from './request-body.mjs';
 import { ingest, renderVideo, mapToSource, mapToOutput, probe, run, ffmpegPath, shutdownMediaProcesses } from './engine.mjs';
 import { interpret, interpreterMode } from './interpreter.mjs';
 import { validateDrawings } from './drawings.mjs';
@@ -70,12 +71,6 @@ async function projectBody(req) {
 
 function json(res, status, value) {
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' }); res.end(JSON.stringify(value));
-}
-
-async function bodyJson(req) {
-  if (!String(req.headers['content-type'] || '').startsWith('application/json')) throw fail('JSON 요청이 필요합니다.', 415);
-  let text = ''; for await (const chunk of req) { text += chunk.toString(); if (Buffer.byteLength(text) > 2_000_000) throw fail('요청이 너무 큽니다.', 413); }
-  try { return JSON.parse(text || '{}'); } catch { throw fail('JSON 형식이 유효하지 않습니다.'); }
 }
 
 function safeName(req) {

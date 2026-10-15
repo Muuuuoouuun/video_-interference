@@ -1,6 +1,7 @@
 import { mkdir, mkdtemp, readFile, writeFile, rename, rm, copyFile, stat } from 'node:fs/promises';
 import { join, extname } from 'node:path';
 import { ffmpegPath, run } from './engine.mjs';
+import { planCanonicalFrameDecode } from './canonical-frames.mjs';
 import { validateDrawings } from './drawings.mjs';
 import { groupDrawings } from '../../packages/core/drawing-anchors.mjs';
 
@@ -32,8 +33,8 @@ export async function prepareRequestContextBundle(comment, { versionPath, durati
   if (comment.attachmentIds.length > 10) throw new Error('한 요청의 첨부 자료는 최대 10개여야 합니다. 자료는 생략하지 않았습니다.');
   await mkdir(directory, { recursive: true }); const bundleDirectory = await mkdtemp(join(directory, 'request-context-')); let completed = false;
   try {
-    const select = planned.sceneFrames.map(item => `eq(n\\,${item.frame})`).join('+');
-    await run(ffmpegPath, ['-y', '-hide_banner', '-loglevel', 'error', '-i', versionPath, '-map', '0:v:0', '-an', '-vf', `select=${select},scale=w='min(640,iw)':h='min(640,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2`, '-fps_mode', 'vfr', '-frames:v', String(planned.sceneFrames.length), '-q:v', '3', '-start_number', '0', join(bundleDirectory, '%02d.jpg')], { signal });
+    const decode = planCanonicalFrameDecode(planned.sceneFrames.map(item => item.frame));
+    await run(ffmpegPath, ['-y', '-hide_banner', '-loglevel', 'error', ...decode.inputArgs, '-i', versionPath, '-map', '0:v:0', '-an', '-vf', `select=${decode.select},scale=w='min(640,iw)':h='min(640,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2`, '-fps_mode', 'vfr', '-frames:v', String(planned.sceneFrames.length), '-q:v', '3', '-start_number', '0', join(bundleDirectory, '%02d.jpg')], { signal });
     const sharp = (await import('sharp')).default, sceneFrames = [];
     for (let index = 0; index < planned.sceneFrames.length; index++) {
       signal?.throwIfAborted(); const item = planned.sceneFrames[index], file = `scene-${item.frame}.jpg`;
