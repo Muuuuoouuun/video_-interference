@@ -3,9 +3,9 @@
 @media (min-width: 901px) {
   .vi-vertical-workspace { position: relative; display: flex; flex-direction: column; flex: 1; width: 100%; min-height: 0; overflow: hidden; }
   .vi-viewer-region { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
-  .vi-timeline-dock { flex: 0 0 var(--vi-timeline-height, 280px); height: var(--vi-timeline-height, 280px); min-height: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; scrollbar-width: thin; }
+  .vi-timeline-dock { flex: 0 0 var(--vi-timeline-height, 240px); height: var(--vi-timeline-height, 240px); min-height: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; scrollbar-width: thin; }
   .vi-vertical-workspace[data-compact="true"] > .vi-timeline-dock { flex-basis: 48px; height: 48px; overflow: visible; }
-  .vi-vertical-resize-handle { position: absolute; left: 0; right: 0; bottom: var(--vi-timeline-height, 280px); height: 10px; transform: translateY(50%); z-index: 12; display: flex; align-items: center; justify-content: center; cursor: row-resize; touch-action: none; user-select: none; }
+  .vi-vertical-resize-handle { position: absolute; left: 0; right: 0; bottom: var(--vi-timeline-height, 240px); height: 10px; transform: translateY(50%); z-index: 12; display: flex; align-items: center; justify-content: center; cursor: row-resize; touch-action: none; user-select: none; }
   .vi-vertical-resize-handle::before { content: ''; position: absolute; left: 0; right: 0; top: 4px; height: 2px; background: transparent; }
   .vi-vertical-resize-handle > span { position: relative; width: 34px; height: 3px; border-radius: 3px; background: #c5cbd4; }
   .vi-vertical-resize-handle:hover::before { background: #b8c1cf; }

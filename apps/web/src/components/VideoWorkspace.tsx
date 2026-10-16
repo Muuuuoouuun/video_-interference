@@ -107,6 +107,7 @@ export function VideoWorkspace({ version, versions, asset, comments, attachments
   const [muted, setMuted] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const [overlayToolbarHost, setOverlayToolbarHost] = useState<HTMLDivElement | null>(null);
+  const [overlayToolsHost, setOverlayToolsHost] = useState<HTMLDivElement | null>(null);
   const [videoRect, setVideoRect] = useState<VideoRect>({ left: 0, top: 0, width: 0, height: 0 });
   const [mediaError, setMediaError] = useState(false);
   const [playError, setPlayError] = useState('');
@@ -520,7 +521,7 @@ export function VideoWorkspace({ version, versions, asset, comments, attachments
             onPause={() => { const state = mediaState(); if (!state.paused) return; setPlaying(false); applyPlayback(playback.observePause(state)); }}
             onEnded={() => { if (!mediaState().ended) return; setPlaying(false); samplePlayback(true); }}
             onError={() => { pauseVideo(); setMediaReady(false); setMediaError(true); }} onClick={togglePlayback} aria-label={`v${version.number} 영상`} />
-          <OverlayEditor drawings={drawings} currentFrame={frame} fallbackFrame={annotationFrame} onFrameSelect={seekFrame} onChange={onDrawingsChange} viewport={preview.rect} enabled={!playing && !imageOverlay} blocked={Boolean(imageOverlay) || editingLocked} blockedLabel={imageOverlay ? '이미지 배치 중' : editingLockLabel ?? '피드백 저장·녹음·첨부 중'} readOnly={annotationsReadOnly} onPause={pauseVideo} onBackgroundClick={togglePlayback} toolbarHost={overlayToolbarHost} resetKey={drawingHistoryKey ?? `${version.id}:draft`} onHistoryChange={onDrawingHistoryChange} onInsertDrawings={onInsertDrawings} onCreate={onDrawingCreate} />
+          <OverlayEditor drawings={drawings} currentFrame={frame} fallbackFrame={annotationFrame} onFrameSelect={seekFrame} onChange={onDrawingsChange} viewport={preview.rect} enabled={!playing && !imageOverlay} blocked={Boolean(imageOverlay) || editingLocked} blockedLabel={imageOverlay ? '이미지 배치 중' : editingLockLabel ?? '피드백 저장·녹음·첨부 중'} readOnly={annotationsReadOnly} onPause={pauseVideo} onBackgroundClick={togglePlayback} toolbarHost={overlayToolbarHost} toolsHost={compactTimeline ? null : overlayToolsHost} resetKey={drawingHistoryKey ?? `${version.id}:draft`} onHistoryChange={onDrawingHistoryChange} onInsertDrawings={onInsertDrawings} onCreate={onDrawingCreate} />
           {imageOverlay ? <div className="vi-image-placement-layer" style={overlayStyle}><ImagePlacementOverlay key={imageOverlay.id} preview={imageOverlay} onEditStart={pauseVideo} /></div> : null}
           {compareVersion ? <span className="vi-viewer-label">v{version.number} · 현재 버전</span> : null}
           {mediaError ? <div className="vi-media-error">영상을 불러오지 못했습니다.<span>영상 파일과 로컬 서버 연결을 확인하세요.</span></div> : null}
@@ -536,12 +537,12 @@ export function VideoWorkspace({ version, versions, asset, comments, attachments
           <button className="vi-view-button" disabled={preview.rect.zoom <= 1} onClick={() => preview.zoom(-1)} aria-label="영상 축소" title="축소 (-)"><Minus size={16}/></button>
           <button className="vi-view-fit" onClick={preview.reset} aria-label="영상 화면에 맞추기" title="화면 맞춤 (0) · 보기 확대는 출력에 적용되지 않습니다">{preview.rect.zoom === 1 ? '맞춤' : `${Math.round(preview.rect.zoom * 100)}%`}</button>
           <button className="vi-view-button" disabled={preview.rect.zoom >= 4} onClick={() => preview.zoom(1)} aria-label="영상 확대" title="확대 (+) · Ctrl / ⌘ + 휠"><Plus size={16}/></button>
-          <button className="vi-view-button" disabled={preview.rect.zoom <= 1} aria-pressed={preview.hand && preview.rect.zoom > 1} onClick={preview.toggleHand} aria-label="확대한 영상 이동" title="이동 도구 (H) · 마우스 가운데 버튼으로도 이동"><Hand size={16}/></button>
           <button className="vi-view-button" onClick={() => setMuted(value => !value)} aria-pressed={muted} aria-label={muted ? '영상 소리 켜기' : '영상 음소거'} title="보기용 음소거 (M)">{muted ? <VolumeX size={16}/> : <Volume2 size={16}/>}</button>
           <button className="vi-view-button" onClick={() => void toggleFullscreen()} aria-label={fullscreen ? '전체 화면 종료' : '영상 전체 화면'} title="전체 화면 (F) · Esc 종료">{fullscreen ? <Minimize size={16}/> : <Maximize size={16}/>}</button>
         </div>
       </div>}>
       <div className="vi-directing-dock" data-compact={compactTimeline}>
+      <div className="vi-review-toolbar" role="group" aria-label="영상 재생과 피드백 도구">
       <div className="vi-player-controls">
         <div className="vi-transport">
           <button className="vi-play-button" disabled={editingLocked || mediaError || !mediaReady} onClick={togglePlayback} aria-label={playing ? '일시 정지' : '영상 재생'} title={mediaReady ? '재생 / 일시 정지 (Space)' : '영상을 불러오는 중'}>{playing ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" />}</button>
@@ -552,10 +553,13 @@ export function VideoWorkspace({ version, versions, asset, comments, attachments
         <div className="vi-player-tools">
           {hasActiveRange ? <button className={`vi-loop-button${loopRange && hasActiveRange ? ' active' : ''}`} disabled={!hasActiveRange || editingLocked || mediaError} aria-pressed={loopRange && hasActiveRange} onClick={() => setLoopRange(enabled => !enabled)} title={hasActiveRange ? '보기용 IN–OUT 반복. 재생 버튼을 누르면 구간 밖에서는 IN부터 시작하며, 멈춘 상태에서는 자동 재생하지 않습니다.' : '구간을 지정하면 반복 재생할 수 있습니다.'}><Repeat2 size={15} />구간 반복</button> : null}
           <label className="vi-playback-speed"><span>보기</span><select aria-label="보기 배속 — 출력 영상에는 적용되지 않음" title="미리보기 재생 배속 ([ / ]). 출력 영상에는 적용되지 않습니다." value={playbackRate} onChange={event => changePlaybackRate(Number(event.target.value))}>{PLAYBACK_RATES.map(rate => <option key={rate} value={rate}>{rate}×</option>)}</select></label>
+          {!compactTimeline ? <button className="vi-dock-icon vi-pan-tool" disabled={preview.rect.zoom <= 1} aria-pressed={preview.hand && preview.rect.zoom > 1} onClick={preview.toggleHand} aria-label="확대한 영상 이동" title="이동 도구 (H) · 마우스 가운데 버튼으로도 이동"><Hand size={16}/></button> : null}
         </div>
       </div>
+      <div className="vi-drawing-tools" ref={setOverlayToolsHost} hidden={compactTimeline || annotationsReadOnly}/>
       <div className="vi-directing-actions">
         {compactTimeline ? <>
+          <button className="vi-dock-icon vi-pan-tool" disabled={preview.rect.zoom <= 1} aria-pressed={preview.hand && preview.rect.zoom > 1} onClick={preview.toggleHand} aria-label="확대한 영상 이동" title="이동 도구 (H)"><Hand size={16}/></button>
           {(hasActiveRange || annotationsReadOnly) && onRangeClear ? <button type="button" className="vi-dock-icon" disabled={editingLocked} aria-label={annotationsReadOnly ? '댓글 선택 해제' : '구간 해제'} title={annotationsReadOnly ? '댓글 선택 해제' : '구간 해제'} onClick={clearRange}><X size={15}/></button> : null}
           <button ref={toolsToggleRef} type="button" className="vi-dock-icon" aria-label="그림 도구" aria-expanded={compactToolsOpen} aria-controls={drawingToolsId} title="그림·도형 도구 열기" onClick={() => setCompactToolsOpen(value => !value)}><Pencil size={15}/></button>
           <button type="button" className="vi-dock-icon" disabled={editingLocked || !canCompose} aria-label={composeLabel} title={`${composeLabel} (C)`} onClick={() => void composeFromViewer()}><MessageSquarePlus size={16}/></button>
@@ -563,6 +567,7 @@ export function VideoWorkspace({ version, versions, asset, comments, attachments
         <button type="button" className="vi-timeline-toggle" aria-label={compactTimeline ? '타임라인 펼치기' : '타임라인 최소화 · 영상 집중'} aria-expanded={!compactTimeline} aria-controls={timelineContentId} title={compactTimeline ? '타임라인 펼치기 · 이전 높이로 복원' : '타임라인을 한 줄로 접고 영상 크게 보기'} onClick={toggleCompactTimeline}>
           {compactTimeline ? <ChevronUp size={16}/> : <ChevronDown size={16}/>}{!compactTimeline ? <span>최소화</span> : null}
         </button>
+      </div>
       </div>
       {!compactTimeline && loopRange && hasActiveRange ? <p className="vi-loop-hint">보기용 반복 · {timecode(safeIn)}–{timecode(safeOut)} · 구간 밖에서 재생하면 IN부터 시작</p> : null}
       <div id={drawingToolsId} className="vi-overlay-controls" ref={setOverlayToolbarHost} hidden={compactTimeline && !compactToolsOpen}/>

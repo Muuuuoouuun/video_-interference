@@ -1,4 +1,4 @@
-export const TIMELINE_HEIGHT_DEFAULT = 280;
+export const TIMELINE_HEIGHT_DEFAULT = 240;
 export const TIMELINE_HEIGHT_MIN = 180;
 export const TIMELINE_HEIGHT_MAX = 600;
 export const TIMELINE_COMPACT_HEIGHT = 48;
