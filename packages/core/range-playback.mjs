@@ -6,7 +6,7 @@ export function createRangePlaybackController() {
   let config = { versionId: '', durationFrames: 1, frameIn: 0, frameOut: 1, loop: false, locked: false };
   let requested = false, waitingForSeek = false;
   const pause = () => { requested = false; waitingForSeek = false; return { pause: true }; };
-  const validMedia = media => !media.error && media.readyState >= 2 && Number.isFinite(media.currentTime) && media.currentTime >= 0;
+  const validMedia = (media, allowSeeking = false) => !media.error && (media.readyState >= 2 || allowSeeking && media.readyState >= 1 && media.seeking) && Number.isFinite(media.currentTime) && media.currentTime >= 0;
   const seek = (frame, play = false) => { waitingForSeek = true; return { seekFrame: frame, ...(play ? { play: true } : {}) }; };
 
   return {
@@ -20,7 +20,9 @@ export function createRangePlaybackController() {
       return changedVersion || locked ? pause() : null;
     },
     requestPlay(media) {
-      if (config.locked || !validMedia(media)) return pause();
+      // Native play() can wait for a pending seek. Preserve an explicit play
+      // immediately after a frame/time jump instead of dropping it at HAVE_METADATA.
+      if (config.locked || !validMedia(media, true)) return pause();
       requested = true;
       const outside = media.currentTime < config.frameIn / FPS || media.currentTime >= config.frameOut / FPS;
       if (config.loop && (outside || media.ended)) return seek(config.frameIn, true);
