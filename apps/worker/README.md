@@ -60,6 +60,39 @@ When available, the initial project copies the repository-local `fixtures/demo.m
 
 Security: loopback binding, exact Host/Origin checks, cross-site request rejection, no permissive CORS, generated storage paths, no caller-provided commands or filesystem paths, image decoding validation, ffprobe media validation, subprocess argument arrays with no shell, and approval validation before rendering. SQLite persists the local project and immutable render snapshots. Interrupted jobs are marked failed on restart.
 
+## Still extraction and request reliability
+
+Scene bundles, feedback exports and timeline filmstrips seek past unused leading
+footage before selecting frames. The shared decoder plan applies only to the
+zero-based 30fps review/render versions. It seeks to a whole second with one
+second of preroll and adjusts the local frame indexes, retaining all requested
+scene and drawing anchors in a single FFmpeg pass. Source VFR footage must be
+normalized before using this path.
+
+A local synthetic benchmark on 2026-10-16 used a 120-second, 960×540, 30fps H.264
+video and a point comment at frame 3457. Complete context-bundle preparation
+(JPEG plus manifest) was compared in the same Node v25.8.2 process after one
+warm-up per implementation, alternating order over five measured rounds:
+
+| Implementation | Times (ms) | Median |
+| --- | --- | --- |
+| Decode from frame zero | 510, 507, 501, 521, 509 | 509 ms |
+| Seek unused prefix | 33, 33, 32, 32, 33 | 33 ms |
+
+All ten scene JPEGs had the same SHA-256. This measures a late point extraction
+with warm file caches; it does not measure import, rendering, UI response time
+or cold external-disk startup. Requests including early scenes must still decode
+from their earliest anchor.
+
+JSON requests are limited to 2,000,000 actual bytes and decoded once, preserving
+Korean and emoji even when UTF-8 bytes span network chunks. Malformed UTF-8,
+invalid JSON and non-object payloads are rejected before project mutation.
+Native regression tests compare sought frames against full decoding at GOP,
+second and EOF boundaries, including feedback-export and drawing anchors.
+The HTTP integration test checks split Korean text through API and SQLite.
+
+Run `npm test` and `npm run build` for verification.
+
 ## Gemini feedback-brief test
 
 The user selected Gemini for needed API tests. `npm run test:gemini -- /path/to/export/manifest.json` validates a portable feedback bundle locally; `--live` makes one explicit Gemini request with up to three selected feedback items and their stills, annotation previews and reference images. Source/rendered videos and audio are excluded. It writes a separate review result and never changes the live project, its comments, exact anchors, approvals or versions. The production interpreter remains separate. See [test workflow](../../docs/Gemini테스트.md). Keys come from ignored `.env.local`, not the browser. Ordinary `npm test` uses mocks and does not call Gemini.

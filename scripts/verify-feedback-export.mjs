@@ -7,7 +7,7 @@ import sharp from 'sharp';
 import { ffmpegPath, ingest, mapToSource, renderVideo, run } from '../apps/worker/engine.mjs';
 
 const hash = async path => createHash('sha256').update(await readFile(path)).digest('hex');
-const codeFiles = ['apps/worker/feedback-export.mjs', 'apps/worker/drawings.mjs', 'packages/core/comment-projection.mjs', 'packages/core/drawing-anchors.mjs'];
+const codeFiles = ['apps/worker/feedback-export.mjs', 'apps/worker/canonical-frames.mjs', 'apps/worker/drawings.mjs', 'packages/core/comment-projection.mjs', 'packages/core/drawing-anchors.mjs'];
 
 /** Local fixture only: preserve the supplied video and never touch the live application project. */
 export async function verifyFeedbackExport({ sourcePath, directory }) {

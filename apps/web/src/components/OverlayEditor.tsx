@@ -45,6 +45,7 @@ interface OverlayEditorProps {
   onPause: () => void;
   onBackgroundClick: () => void;
   toolbarHost: HTMLElement | null;
+  toolsHost?: HTMLElement | null;
   resetKey: string;
   onHistoryChange?: (available: boolean) => void;
   onInsertDrawings?: () => void;
@@ -94,7 +95,7 @@ function SelectionHandles({ drawing, logicalHeight, viewport }: { drawing: Drawi
   </g>;
 }
 
-export const OverlayEditor = memo(function OverlayEditor({ drawings, currentFrame, fallbackFrame, onFrameSelect, onChange, viewport, enabled, blocked = false, readOnly = false, blockedLabel = '이미지 배치 중', onPause, onBackgroundClick, toolbarHost, resetKey, onHistoryChange, onInsertDrawings, onCreate }: OverlayEditorProps) {
+export const OverlayEditor = memo(function OverlayEditor({ drawings, currentFrame, fallbackFrame, onFrameSelect, onChange, viewport, enabled, blocked = false, readOnly = false, blockedLabel = '이미지 배치 중', onPause, onBackgroundClick, toolbarHost, toolsHost, resetKey, onHistoryChange, onInsertDrawings, onCreate }: OverlayEditorProps) {
   const ownerId = `oe-${useId().replace(/:/g, '')}`;
   const svgRef = useRef<SVGSVGElement>(null);
   const [tool, setTool] = useState<Tool>('select');
@@ -431,12 +432,13 @@ export const OverlayEditor = memo(function OverlayEditor({ drawings, currentFram
     {historyFrameHint !== null && historyFrameHint !== currentFrame && onFrameSelect ? <button className="oe-history-frame-link" disabled={blocked} onClick={() => onFrameSelect(historyFrameHint)}>변경 장면 {frameTime(historyFrameHint)} 보기</button> : null}
   </div>;
   const canvasStyle: CSSProperties = { left: viewport.left, top: viewport.top, width: viewport.width, height: viewport.height, display: !enabled ? 'none' : undefined, pointerEvents: readOnly || blocked ? 'none' : undefined };
-  const toolbar = <div className={`oe-toolbar${blocked ? ' oe-toolbar-blocked' : ''}`} data-overlay-owner={ownerId} data-history-revision={historyRevision}>
-    <div className="oe-toolbar-main">
+  const tools = <div className="oe-toolbar-main" data-overlay-owner={ownerId} data-history-revision={historyRevision}>
       <div className="oe-tool-group" role="group" aria-label="영상 위 그림 도구">{TOOL_OPTIONS.map(({ id, label, shortcut, icon: Icon }) => <button key={id} className={`oe-tool${tool === id ? ' oe-tool-active' : ''}`} disabled={blocked} onClick={() => chooseTool(id)} aria-label={`${label} 도구`} aria-pressed={tool === id} title={`${label} (${shortcut})`}><Icon size={16} /><span>{label}</span></button>)}</div>
       <div className="oe-history-actions"><button disabled={blocked || !enabled || !history?.canUndo} onClick={undo} aria-label="그림 편집 되돌리기" title="전체 그림 기록 되돌리기 (⌘/Ctrl Z)"><CornerUpLeft size={16} /></button><button disabled={blocked || !enabled || !history?.canRedo} onClick={redo} aria-label="그림 편집 다시 실행" title="전체 그림 기록 다시 실행 (⌘/Ctrl Shift Z)"><CornerUpRight size={16} /></button><span className="oe-toolbar-divider" /><button disabled={blocked || !enabled || !selected} onClick={deleteSelected} aria-label="선택한 그림 삭제" title="선택 삭제 (Delete)"><Trash2 size={15} /></button><button disabled={blocked || !enabled || !visibleDrawings.length} onClick={clearCurrentFrame} aria-label="현재 프레임 그림 지우기" title="현재 프레임 그림만 지우기"><Eraser size={16} /></button></div>
       {onInsertDrawings ? <button className="oe-insert-button" disabled={blocked || !enabled || !drawings.length || multipleFrames} onClick={() => { endEditGroup(); if (!multipleFrames) onInsertDrawings(); }} title={multipleFrames ? '원하는 장면만 복사한 요청에서 영상에 넣어 주세요.' : '이 그림으로 영상 삽입 요청을 만듭니다. 승인 후 렌더에 적용됩니다.'}><Plus size={14} />영상에 넣기</button> : null}
-    </div>
+    </div>;
+  const toolbar = <div className={`oe-toolbar${blocked ? ' oe-toolbar-blocked' : ''}`} data-overlay-owner={ownerId} data-history-revision={historyRevision}>
+    {!toolsHost ? tools : null}
     {onInsertDrawings && multipleFrames ? <p className="oe-insert-frame-warning">여러 장면의 그림입니다. 선택한 장면만 복사한 새 요청에서 영상에 넣어 주세요.</p> : null}
     {frameGroups.length > 0 || historyFrameHint !== null ? sceneNavigation : null}
     <details className="oe-style-details"><summary>그림 스타일<span>색상 · 굵기 · 채움</span></summary>
@@ -460,6 +462,7 @@ export const OverlayEditor = memo(function OverlayEditor({ drawings, currentFram
       </g>
       {!readOnly && !blocked && selection && tool === 'select' ? <SelectionHandles drawing={selection} logicalHeight={logicalHeight} viewport={viewport} /> : null}
     </svg>
+    {!readOnly && toolsHost ? createPortal(tools, toolsHost) : null}
     {toolbarHost ? createPortal(readOnly ? <div className="oe-readonly-context">{sceneNavigation}<div className="oe-editor-status"><span>저장된 위치 표시 · 각 그림의 작성 프레임에서 표시</span><span>그림을 바꾸려면 새 요청으로 복사하세요.</span></div></div> : toolbar, toolbarHost) : null}
   </>;
 });

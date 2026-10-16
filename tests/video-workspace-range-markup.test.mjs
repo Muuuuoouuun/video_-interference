@@ -51,7 +51,7 @@ test('SSR expanded directing workspace exposes a height separator and explicit m
   const html = markup();
   assert.match(html, /aria-label="영상과 타임라인 높이 조절" aria-orientation="horizontal"/);
   assert.match(html, /aria-label="타임라인 최소화 · 영상 집중" aria-expanded="true"/);
-  assert.match(html, /--vi-timeline-height:280px/);
+  assert.match(html, /--vi-timeline-height:240px/);
   assert.equal((html.match(/<video\b/g) ?? []).length, 1);
 });
 
@@ -79,7 +79,7 @@ test('SSR persisted compact timeline retains seeking, markers and range handles 
 test('SSR layout remains available when persisted settings cannot be read', () => {
   const html = withLayoutStorage(() => { throw new Error('storage unavailable'); }, () => markup());
   assert.match(html, /data-timeline-compact="false"/);
-  assert.match(html, /--vi-timeline-height:280px/);
+  assert.match(html, /--vi-timeline-height:240px/);
   assert.match(html, /aria-label="타임라인 최소화 · 영상 집중"/);
 });
 function buttonWithText(html, text) {

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useImperativeHandle, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, Ref } from 'react';
-import { ChevronDown, ChevronUp, MessageSquarePlus, Pause, Pencil, Play, Plus, Repeat2, SkipBack, SkipForward, X } from 'lucide-react';
+import { ChevronDown, ChevronUp, Hand, Maximize, Minimize, Minus, MessageSquarePlus, Pause, Pencil, Play, Plus, Repeat2, SkipBack, SkipForward, Volume2, VolumeX, X } from 'lucide-react';
 import type { Asset, Attachment, Comment, Drawing, Version } from '../../../../packages/core/types';
 import { mapFrameBetweenVersions, projectComment } from '../../../../packages/core/comment-projection.mjs';
 import { createRangePlaybackController } from '../../../../packages/core/range-playback.mjs';
@@ -16,6 +16,8 @@ import { TimelineSelection } from './TimelineSelection';
 import { TimelineDetails } from './TimelineDetails';
 import { TimelineSeekSurface } from './TimelineSeekSurface';
 import { VerticalWorkspaceLayout } from './VerticalWorkspaceLayout';
+import { usePreviewViewport } from './usePreviewViewport';
+import { TimecodeSeek, type TimecodeSeekHandle } from './TimecodeSeek';
 import { time as timecode } from '../format';
 import './VideoWorkspace.css';
 import './DirectingLayout.css';
@@ -23,6 +25,7 @@ import './DirectingLayout.css';
 const FPS = 30;
 const EMPTY_ATTACHMENTS: Attachment[] = [];
 const COMPACT_TIMELINE_KEY = 'interference.timeline-compact.v1';
+const PLAYBACK_RATES = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4];
 function readCompactTimeline() {
   try { return typeof window !== 'undefined' && window.localStorage.getItem(COMPACT_TIMELINE_KEY) === 'true'; }
   catch { return false; }
@@ -82,6 +85,8 @@ export function VideoWorkspace({ version, versions, asset, comments, attachments
   const toolsToggleRef = useRef<HTMLButtonElement>(null);
   const focusDrawingAfterTool = useRef(false);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const workspaceRef = useRef<HTMLElement>(null);
+  const timecodeRef = useRef<TimecodeSeekHandle>(null);
   const compareRef = useRef<HTMLVideoElement>(null);
   const surfaceRef = useRef<HTMLDivElement>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
@@ -99,7 +104,10 @@ export function VideoWorkspace({ version, versions, asset, comments, attachments
   const playbackCallbacks = useRef({ onFrameChange });
   playbackCallbacks.current = { onFrameChange };
   const [playbackRate, setPlaybackRate] = useState(1);
+  const [muted, setMuted] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
   const [overlayToolbarHost, setOverlayToolbarHost] = useState<HTMLDivElement | null>(null);
+  const [overlayToolsHost, setOverlayToolsHost] = useState<HTMLDivElement | null>(null);
   const [videoRect, setVideoRect] = useState<VideoRect>({ left: 0, top: 0, width: 0, height: 0 });
   const [mediaError, setMediaError] = useState(false);
   const [playError, setPlayError] = useState('');
@@ -178,6 +186,33 @@ export function VideoWorkspace({ version, versions, asset, comments, attachments
   }, [applyPlayback, mediaState, playback, publishFrame]);
 
   const pauseVideo = useCallback(() => applyPlayback(playback.requestPause()), [applyPlayback, playback]);
+  const preview = usePreviewViewport(surfaceRef, videoRect, version.id, pauseVideo);
+  const toggleFullscreen = useCallback(async () => {
+    try {
+      if (document.fullscreenElement === workspaceRef.current) await document.exitFullscreen();
+      else await workspaceRef.current?.requestFullscreen();
+    } catch { setPlayError('전체 화면을 열지 못했습니다. 전체 화면 버튼으로 다시 시도하세요.'); }
+  }, []);
+  useEffect(() => {
+    const change = () => setFullscreen(document.fullscreenElement === workspaceRef.current);
+    document.addEventListener('fullscreenchange', change);
+    return () => document.removeEventListener('fullscreenchange', change);
+  }, []);
+  const composeFromViewer = useCallback(async () => {
+    if (document.fullscreenElement === workspaceRef.current) {
+      try { await document.exitFullscreen(); } catch { return; }
+    }
+    onCompose();
+  }, [onCompose]);
+  const changePlaybackRate = useCallback((rate: number) => {
+    setPlaybackRate(rate);
+    if (videoRef.current) videoRef.current.playbackRate = rate;
+  }, []);
+  const stepPlaybackRate = useCallback((direction: number) => {
+    const current = videoRef.current?.playbackRate ?? 1;
+    const next = direction > 0 ? PLAYBACK_RATES.find(rate => rate > current) ?? 4 : PLAYBACK_RATES.filter(rate => rate < current).at(-1) ?? 0.25;
+    changePlaybackRate(next);
+  }, [changePlaybackRate]);
 
   const pauseAndReadFrame = useCallback(() => {
     pauseVideo();
@@ -343,20 +378,33 @@ export function VideoWorkspace({ version, versions, asset, comments, attachments
     const next = markTimelineRange({ edge, frame: pauseAndReadFrame(), durationFrames, range: { in: safeIn, out: safeOut }, active: hasActiveRange });
     if (next) onRangeChange(next);
   }, [editingLocked, annotationsReadOnly, pauseAndReadFrame, durationFrames, safeIn, safeOut, hasActiveRange, onRangeChange]);
-  const keyboardActionsRef = useRef({ frame, seekFrame, togglePlayback, markRange, onCompose, editingLocked, annotationsReadOnly: annotationsReadOnly || editingLocked });
-  keyboardActionsRef.current = { frame, seekFrame, togglePlayback, markRange, onCompose, editingLocked, annotationsReadOnly: annotationsReadOnly || editingLocked };
+  const keyboardActions = { frame, seekFrame, togglePlayback, markRange, onCompose: composeFromViewer, editingLocked, annotationsReadOnly: annotationsReadOnly || editingLocked, durationFrames, stepPlaybackRate, toggleFullscreen, previewZoom: preview.zoom, previewReset: preview.reset, toggleHand: preview.toggleHand, timecodeRef };
+  const keyboardActionsRef = useRef(keyboardActions);
+  keyboardActionsRef.current = keyboardActions;
 
   useEffect(() => {
     const handleKey = (event: KeyboardEvent) => {
       const element = event.target as HTMLElement | null;
-      if (event.defaultPrevented || event.isComposing || event.keyCode === 229 || element?.closest('input, textarea, select, button, audio, video, summary, [contenteditable], dialog, [role="dialog"]') || event.metaKey || event.ctrlKey || event.altKey) return;
-      if (event.repeat && event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+      if (event.defaultPrevented || event.isComposing || event.keyCode === 229 || element?.closest('input, textarea, select, audio, video, [contenteditable], dialog, [role="dialog"]') || event.metaKey || event.ctrlKey || event.altKey) return;
+      if (element?.closest('button, summary') && (event.code === 'Space' || event.key === 'Enter')) return;
+      if (event.repeat && !['ArrowLeft', 'ArrowRight', '+', '=', '-', 'j', 'l'].includes(event.key)) return;
       const actions = keyboardActionsRef.current;
       if (actions.editingLocked) return;
-      if (event.code === 'Space') { event.preventDefault(); actions.togglePlayback(); }
+      const key = event.key.toLowerCase();
+      if (event.code === 'Space' || key === 'k') { event.preventDefault(); actions.togglePlayback(); }
       else if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
-        event.preventDefault(); actions.seekFrame(actions.frame + (event.key === 'ArrowRight' ? 1 : -1) * (event.shiftKey ? FPS : 1));
-      } else if (event.key.toLowerCase() === 'i' && !actions.annotationsReadOnly) {
+        event.preventDefault(); actions.seekFrame(currentFrameRef.current + (event.key === 'ArrowRight' ? 1 : -1) * (event.shiftKey ? FPS : 1));
+      } else if (key === 'j' || key === 'l') { event.preventDefault(); actions.seekFrame(currentFrameRef.current + (key === 'j' ? -5 : 5) * FPS); }
+      else if (key === 'home' || key === 'end') { event.preventDefault(); actions.seekFrame(key === 'home' ? 0 : actions.durationFrames - 1); }
+      else if (key === '[' || key === ']') { event.preventDefault(); actions.stepPlaybackRate(key === ']' ? 1 : -1); }
+      else if (key === 'm') { event.preventDefault(); setMuted(value => !value); }
+      else if (key === 'f') { event.preventDefault(); void actions.toggleFullscreen(); }
+      else if (key === 'escape' && document.fullscreenElement === workspaceRef.current) { event.preventDefault(); void actions.toggleFullscreen(); }
+      else if (key === 'g') { event.preventDefault(); actions.timecodeRef.current?.open(); }
+      else if (key === '+' || key === '=' || key === '-') { event.preventDefault(); actions.previewZoom(key === '-' ? -1 : 1); }
+      else if (key === '0') { event.preventDefault(); actions.previewReset(); }
+      else if (key === 'h') { event.preventDefault(); actions.toggleHand(); }
+      else if (key === 'i' && !actions.annotationsReadOnly) {
         event.preventDefault(); actions.markRange('in');
       } else if (event.key.toLowerCase() === 'o' && !actions.annotationsReadOnly) {
         event.preventDefault(); actions.markRange('out');
@@ -453,10 +501,10 @@ export function VideoWorkspace({ version, versions, asset, comments, attachments
     try { window.localStorage.setItem(COMPACT_TIMELINE_KEY, String(next)); } catch { /* Layout still works without storage. */ }
   }
 
-  const overlayStyle: CSSProperties = { left: videoRect.left, top: videoRect.top, width: videoRect.width, height: videoRect.height };
+  const overlayStyle: CSSProperties = { left: preview.rect.left, top: preview.rect.top, width: preview.rect.width, height: preview.rect.height };
 
   return (
-    <section className="vi-workspace" data-timeline-compact={compactTimeline} aria-label="영상과 시간별 피드백 작업 공간"
+    <section ref={workspaceRef} className="vi-workspace" data-timeline-compact={compactTimeline} aria-label="영상과 시간별 피드백 작업 공간"
       onClick={event => {
         // Toolbar events bubble through the editor's React owner, across its portal.
         if (compactTimeline && compactToolsOpen && event.target instanceof Element && event.target.closest('button.oe-tool:not(:disabled)')) {
@@ -464,8 +512,8 @@ export function VideoWorkspace({ version, versions, asset, comments, attachments
         }
       }}>
       <VerticalWorkspaceLayout compact={compactTimeline} viewer={<div className={`vi-viewer${compareVersion ? ' vi-viewer-comparing' : ''}`}>
-        <div className="vi-video-surface" ref={surfaceRef}>
-          <video ref={videoRef} src={version.mediaUrl} poster={version.thumbnailUrl || asset.thumbnailUrl} preload="metadata" playsInline
+        <div className={`vi-video-surface${preview.hand && preview.rect.zoom > 1 ? ' vi-hand-mode' : ''}${preview.panning ? ' vi-panning' : ''}`} ref={surfaceRef} {...preview.events}>
+          <video ref={videoRef} style={overlayStyle} muted={muted} src={version.mediaUrl} poster={version.thumbnailUrl || asset.thumbnailUrl} preload="metadata" playsInline
             onLoadedMetadata={() => { const video = videoRef.current; if (video) { video.currentTime = currentFrameRef.current / FPS; video.playbackRate = playbackRate; } measureVideo(); }}
             onLoadedData={() => setMediaReady(true)} onCanPlay={() => setMediaReady(true)}
             onTimeUpdate={() => samplePlayback(true)} onSeeked={() => { playback.observeSeeked(); samplePlayback(true); }}
@@ -473,7 +521,7 @@ export function VideoWorkspace({ version, versions, asset, comments, attachments
             onPause={() => { const state = mediaState(); if (!state.paused) return; setPlaying(false); applyPlayback(playback.observePause(state)); }}
             onEnded={() => { if (!mediaState().ended) return; setPlaying(false); samplePlayback(true); }}
             onError={() => { pauseVideo(); setMediaReady(false); setMediaError(true); }} onClick={togglePlayback} aria-label={`v${version.number} 영상`} />
-          <OverlayEditor drawings={drawings} currentFrame={frame} fallbackFrame={annotationFrame} onFrameSelect={seekFrame} onChange={onDrawingsChange} viewport={videoRect} enabled={!playing && !imageOverlay} blocked={Boolean(imageOverlay) || editingLocked} blockedLabel={imageOverlay ? '이미지 배치 중' : editingLockLabel ?? '피드백 저장·녹음·첨부 중'} readOnly={annotationsReadOnly} onPause={pauseVideo} onBackgroundClick={togglePlayback} toolbarHost={overlayToolbarHost} resetKey={drawingHistoryKey ?? `${version.id}:draft`} onHistoryChange={onDrawingHistoryChange} onInsertDrawings={onInsertDrawings} onCreate={onDrawingCreate} />
+          <OverlayEditor drawings={drawings} currentFrame={frame} fallbackFrame={annotationFrame} onFrameSelect={seekFrame} onChange={onDrawingsChange} viewport={preview.rect} enabled={!playing && !imageOverlay} blocked={Boolean(imageOverlay) || editingLocked} blockedLabel={imageOverlay ? '이미지 배치 중' : editingLockLabel ?? '피드백 저장·녹음·첨부 중'} readOnly={annotationsReadOnly} onPause={pauseVideo} onBackgroundClick={togglePlayback} toolbarHost={overlayToolbarHost} toolsHost={compactTimeline ? null : overlayToolsHost} resetKey={drawingHistoryKey ?? `${version.id}:draft`} onHistoryChange={onDrawingHistoryChange} onInsertDrawings={onInsertDrawings} onCreate={onDrawingCreate} />
           {imageOverlay ? <div className="vi-image-placement-layer" style={overlayStyle}><ImagePlacementOverlay key={imageOverlay.id} preview={imageOverlay} onEditStart={pauseVideo} /></div> : null}
           {compareVersion ? <span className="vi-viewer-label">v{version.number} · 현재 버전</span> : null}
           {mediaError ? <div className="vi-media-error">영상을 불러오지 못했습니다.<span>영상 파일과 로컬 서버 연결을 확인하세요.</span></div> : null}
@@ -485,29 +533,41 @@ export function VideoWorkspace({ version, versions, asset, comments, attachments
           {comparisonFrame === null ? <div className="vi-compare-gap">이 원본 구간은 비교 버전에 없습니다.</div> : null}
           <span className="vi-compare-note">원본 위치에 대응하는 프레임 참조</span>
         </div> : null}
+        <div className="vi-view-tools" role="group" aria-label="영상 보기 도구" onPointerDown={event => event.stopPropagation()}>
+          <button className="vi-view-button" disabled={preview.rect.zoom <= 1} onClick={() => preview.zoom(-1)} aria-label="영상 축소" title="축소 (-)"><Minus size={16}/></button>
+          <button className="vi-view-fit" onClick={preview.reset} aria-label="영상 화면에 맞추기" title="화면 맞춤 (0) · 보기 확대는 출력에 적용되지 않습니다">{preview.rect.zoom === 1 ? '맞춤' : `${Math.round(preview.rect.zoom * 100)}%`}</button>
+          <button className="vi-view-button" disabled={preview.rect.zoom >= 4} onClick={() => preview.zoom(1)} aria-label="영상 확대" title="확대 (+) · Ctrl / ⌘ + 휠"><Plus size={16}/></button>
+          <button className="vi-view-button" onClick={() => setMuted(value => !value)} aria-pressed={muted} aria-label={muted ? '영상 소리 켜기' : '영상 음소거'} title="보기용 음소거 (M)">{muted ? <VolumeX size={16}/> : <Volume2 size={16}/>}</button>
+          <button className="vi-view-button" onClick={() => void toggleFullscreen()} aria-label={fullscreen ? '전체 화면 종료' : '영상 전체 화면'} title="전체 화면 (F) · Esc 종료">{fullscreen ? <Minimize size={16}/> : <Maximize size={16}/>}</button>
+        </div>
       </div>}>
       <div className="vi-directing-dock" data-compact={compactTimeline}>
+      <div className="vi-review-toolbar" role="group" aria-label="영상 재생과 피드백 도구">
       <div className="vi-player-controls">
         <div className="vi-transport">
           <button className="vi-play-button" disabled={editingLocked || mediaError || !mediaReady} onClick={togglePlayback} aria-label={playing ? '일시 정지' : '영상 재생'} title={mediaReady ? '재생 / 일시 정지 (Space)' : '영상을 불러오는 중'}>{playing ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" />}</button>
           <button className="vi-icon-button" disabled={editingLocked || mediaError} onClick={() => seekFrame(frame - 1)} aria-label="이전 프레임" title="이전 프레임 (←)"><SkipBack size={18} fill="currentColor" /></button>
           <button className="vi-icon-button" disabled={editingLocked || mediaError} onClick={() => seekFrame(frame + 1)} aria-label="다음 프레임" title="다음 프레임 (→)"><SkipForward size={18} fill="currentColor" /></button>
-          <div className="vi-timecode"><strong>{timecode(frame)}</strong><span>/ {timecode(durationFrames)}</span></div>
+          <TimecodeSeek key={version.id} frame={frame} durationFrames={durationFrames} locked={editingLocked || mediaError} onReadFrame={pauseAndReadFrame} onSeek={seekFrame} controlRef={timecodeRef}/>
         </div>
         <div className="vi-player-tools">
           {hasActiveRange ? <button className={`vi-loop-button${loopRange && hasActiveRange ? ' active' : ''}`} disabled={!hasActiveRange || editingLocked || mediaError} aria-pressed={loopRange && hasActiveRange} onClick={() => setLoopRange(enabled => !enabled)} title={hasActiveRange ? '보기용 IN–OUT 반복. 재생 버튼을 누르면 구간 밖에서는 IN부터 시작하며, 멈춘 상태에서는 자동 재생하지 않습니다.' : '구간을 지정하면 반복 재생할 수 있습니다.'}><Repeat2 size={15} />구간 반복</button> : null}
-          <label className="vi-playback-speed"><span>보기</span><select aria-label="보기 배속 — 출력 영상에는 적용되지 않음" title="미리보기 재생 배속. 출력 영상에는 적용되지 않습니다." value={playbackRate} onChange={(event) => { const rate = Number(event.target.value); setPlaybackRate(rate); if (videoRef.current) videoRef.current.playbackRate = rate; }}>{[0.5, 1, 1.5, 2].map((rate) => <option key={rate} value={rate}>{rate}×</option>)}</select></label>
+          <label className="vi-playback-speed"><span>보기</span><select aria-label="보기 배속 — 출력 영상에는 적용되지 않음" title="미리보기 재생 배속 ([ / ]). 출력 영상에는 적용되지 않습니다." value={playbackRate} onChange={event => changePlaybackRate(Number(event.target.value))}>{PLAYBACK_RATES.map(rate => <option key={rate} value={rate}>{rate}×</option>)}</select></label>
+          {!compactTimeline ? <button className="vi-dock-icon vi-pan-tool" disabled={preview.rect.zoom <= 1} aria-pressed={preview.hand && preview.rect.zoom > 1} onClick={preview.toggleHand} aria-label="확대한 영상 이동" title="이동 도구 (H) · 마우스 가운데 버튼으로도 이동"><Hand size={16}/></button> : null}
         </div>
       </div>
+      <div className="vi-drawing-tools" ref={setOverlayToolsHost} hidden={compactTimeline || annotationsReadOnly}/>
       <div className="vi-directing-actions">
         {compactTimeline ? <>
+          <button className="vi-dock-icon vi-pan-tool" disabled={preview.rect.zoom <= 1} aria-pressed={preview.hand && preview.rect.zoom > 1} onClick={preview.toggleHand} aria-label="확대한 영상 이동" title="이동 도구 (H)"><Hand size={16}/></button>
           {(hasActiveRange || annotationsReadOnly) && onRangeClear ? <button type="button" className="vi-dock-icon" disabled={editingLocked} aria-label={annotationsReadOnly ? '댓글 선택 해제' : '구간 해제'} title={annotationsReadOnly ? '댓글 선택 해제' : '구간 해제'} onClick={clearRange}><X size={15}/></button> : null}
           <button ref={toolsToggleRef} type="button" className="vi-dock-icon" aria-label="그림 도구" aria-expanded={compactToolsOpen} aria-controls={drawingToolsId} title="그림·도형 도구 열기" onClick={() => setCompactToolsOpen(value => !value)}><Pencil size={15}/></button>
-          <button type="button" className="vi-dock-icon" disabled={editingLocked || !canCompose} aria-label={composeLabel} title={`${composeLabel} (C)`} onClick={onCompose}><MessageSquarePlus size={16}/></button>
+          <button type="button" className="vi-dock-icon" disabled={editingLocked || !canCompose} aria-label={composeLabel} title={`${composeLabel} (C)`} onClick={() => void composeFromViewer()}><MessageSquarePlus size={16}/></button>
         </> : null}
         <button type="button" className="vi-timeline-toggle" aria-label={compactTimeline ? '타임라인 펼치기' : '타임라인 최소화 · 영상 집중'} aria-expanded={!compactTimeline} aria-controls={timelineContentId} title={compactTimeline ? '타임라인 펼치기 · 이전 높이로 복원' : '타임라인을 한 줄로 접고 영상 크게 보기'} onClick={toggleCompactTimeline}>
           {compactTimeline ? <ChevronUp size={16}/> : <ChevronDown size={16}/>}{!compactTimeline ? <span>최소화</span> : null}
         </button>
+      </div>
       </div>
       {!compactTimeline && loopRange && hasActiveRange ? <p className="vi-loop-hint">보기용 반복 · {timecode(safeIn)}–{timecode(safeOut)} · 구간 밖에서 재생하면 IN부터 시작</p> : null}
       <div id={drawingToolsId} className="vi-overlay-controls" ref={setOverlayToolbarHost} hidden={compactTimeline && !compactToolsOpen}/>
@@ -534,7 +594,7 @@ export function VideoWorkspace({ version, versions, asset, comments, attachments
 
       <div className="vi-workspace-bottom" hidden={compactTimeline}>
         <span className="vi-drawing-contract">그림은 시간별 피드백에 함께 저장됩니다.</span>
-        <button className="vi-compose-button" disabled={editingLocked || !canCompose} onClick={onCompose} title="현재 시점이나 선택 구간에 피드백 작성 (C)"><Plus size={16} />{composeLabel}</button>
+        <button className="vi-compose-button" disabled={editingLocked || !canCompose} onClick={() => void composeFromViewer()} title="현재 시점이나 선택 구간에 피드백 작성 (C)"><Plus size={16} />{composeLabel}</button>
       </div>
       <div className="vi-shortcut-note"><span><kbd>Space</kbd> 재생</span><span><kbd>←</kbd><kbd>→</kbd> 프레임</span><span><kbd>I</kbd><kbd>O</kbd> 구간</span><span><kbd>C</kbd> 피드백</span><span className="vi-frame-precision">30 fps 기준 · OUT 제외</span></div>
       </div>

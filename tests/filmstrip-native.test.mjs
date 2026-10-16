@@ -20,6 +20,18 @@ test('native filmstrip advertises exact frames, keeps distinct scenes and starts
   assert.equal(result.cold.nativeCalls.length, 1); assert.equal(result.warm.nativeCalls.length, 0);
 });
 
+test('long filmstrip skips its unused prefix while matching every original frame', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'vi-long-filmstrip-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const sourcePath = join(directory, 'source.mp4');
+  await run(ffmpegPath, ['-y', '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=160x90:rate=30:duration=60', '-c:v', 'libx264', '-g', '47', '-pix_fmt', 'yuv420p', sourcePath]);
+  const result = await measureFilmstrip({ versionId: 'long', videoPath: sourcePath, durationFrames: 1800, directory: join(directory, 'measured') });
+  assert.equal(result.cold.result.frames[0], 75, 'first sample permits a whole-second prefix seek');
+  const checks = await verifyFilmstripPixels({ strip: result.cold.result, videoPath: sourcePath, directory: join(directory, 'reference') });
+  assert.equal(checks.length, 12);
+  assert.equal(result.cold.nativeCalls.length, 1); assert.equal(result.warm.nativeCalls.length, 0);
+});
+
 test('native portrait filmstrip preserves aspect and black padding for every advertised sample', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'video-interference-filmstrip-portrait-')); t.after(() => rm(directory, { recursive: true, force: true }));
   const sourcePath = join(directory, 'portrait.mp4');

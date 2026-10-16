@@ -100,3 +100,18 @@ test('ordinary playback ends once; replay starts at zero and CFR display stays i
   assert.deepEqual(controller.requestPlay(media(300, { ended: true, paused: true })), { seekFrame: 0, play: true });
   assert.equal(controller.frameAt(0), 0); assert.equal(controller.frameAt(1 / 30), 1); assert.equal(controller.frameAt(10), 299);
 });
+
+test('play immediately after a time jump survives temporary metadata-only readiness while pause still wins', () => {
+  const controller = ready({ loop: false });
+  assert.deepEqual(controller.requestPlay(media(158, { readyState: 1, seeking: true, paused: true })), { play: true });
+  assert.equal(controller.playingRequested, true);
+  assert.equal(controller.observeFrame(media(158, { readyState: 1, seeking: true })), null);
+  controller.observeSeeked();
+  assert.equal(controller.observeFrame(media(159)), null);
+  controller.requestPause();
+  assert.equal(controller.playingRequested, false);
+  assert.equal(controller.observeFrame(media(160, { paused: true })), null);
+  assert.deepEqual(controller.requestPlay(media(158, { readyState: 0, seeking: true })), { pause: true });
+  controller.configure({ ...config, locked: true });
+  assert.deepEqual(controller.requestPlay(media(158, { readyState: 1, seeking: true })), { pause: true });
+});
