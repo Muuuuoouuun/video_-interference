@@ -11,13 +11,14 @@ import { OverlayEditor } from './OverlayEditor';
 import { ImagePlacementOverlay } from './ImagePlacementOverlay';
 import type { ImageOverlayPreview } from './ImagePlacementOverlay';
 import { TimelineFilmstrip } from './TimelineFilmstrip';
-import { TimelineMarkers, type FeedbackMarker } from './TimelineMarkers';
+import { TimelineMarkers, TimelineSavedRanges, type FeedbackMarker } from './TimelineMarkers';
 import { TimelineSelection } from './TimelineSelection';
 import { TimelineDetails } from './TimelineDetails';
 import { TimelineSeekSurface } from './TimelineSeekSurface';
 import { VerticalWorkspaceLayout } from './VerticalWorkspaceLayout';
 import { usePreviewViewport } from './usePreviewViewport';
 import { TimecodeSeek, type TimecodeSeekHandle } from './TimecodeSeek';
+import { feedbackCategory } from '../../../../packages/core/feedback-category.mjs';
 import { time as timecode } from '../format';
 import './VideoWorkspace.css';
 import './DirectingLayout.css';
@@ -83,7 +84,6 @@ export function VideoWorkspace({ version, versions, asset, comments, attachments
   const timelineContentId = useId();
   const drawingToolsId = useId();
   const toolsToggleRef = useRef<HTMLButtonElement>(null);
-  const focusDrawingAfterTool = useRef(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const workspaceRef = useRef<HTMLElement>(null);
   const timecodeRef = useRef<TimecodeSeekHandle>(null);
@@ -116,15 +116,10 @@ export function VideoWorkspace({ version, versions, asset, comments, attachments
   const safeIn = clamp(range.in, 0, durationFrames - 1);
   const safeOut = clamp(range.out, safeIn + 1, durationFrames);
   const hasActiveRange = rangeAvailable && rangeActive;
-  useLayoutEffect(() => {
-    if (!compactToolsOpen && focusDrawingAfterTool.current) {
-      focusDrawingAfterTool.current = false;
-      surfaceRef.current?.querySelector<SVGSVGElement>('.oe-canvas')?.focus({ preventScroll: true });
-    }
-  }, [compactToolsOpen]);
   useEffect(() => {
     if (!compactTimeline || !compactToolsOpen) return;
     const dismiss = (event: PointerEvent) => {
+      if (event.target instanceof Element && event.target.closest('.oe-style-popover')) return;
       if (event.target instanceof Node && !overlayToolbarHost?.contains(event.target) && !toolsToggleRef.current?.contains(event.target)) setCompactToolsOpen(false);
     };
     const escape = (event: KeyboardEvent) => {
@@ -144,6 +139,7 @@ export function VideoWorkspace({ version, versions, asset, comments, attachments
   const markers = useMemo(() => visibleComments.flatMap(({ comment, index, projection }) => projection.ranges.map((mapped, rangeIndex) => ({
     key: `${comment.id}-${rangeIndex}`, comment, number: index + 1, frame: mapped.frameIn, frameOut: mapped.frameOut, rangeIndex, rangeCount: projection.ranges.length,
   }))), [visibleComments]);
+  const selectedCategory = useMemo(() => feedbackCategory(markers.find(marker => marker.comment.id === selectedCommentId)?.comment), [markers, selectedCommentId]);
   const comparisonFrame = compareVersion ? mapFrameBetweenVersions(version, compareVersion, frame) : null;
   currentFrameRef.current = frame;
 
@@ -505,12 +501,7 @@ export function VideoWorkspace({ version, versions, asset, comments, attachments
 
   return (
     <section ref={workspaceRef} className="vi-workspace" data-timeline-compact={compactTimeline} aria-label="영상과 시간별 피드백 작업 공간"
-      onClick={event => {
-        // Toolbar events bubble through the editor's React owner, across its portal.
-        if (compactTimeline && compactToolsOpen && event.target instanceof Element && event.target.closest('button.oe-tool:not(:disabled)')) {
-          focusDrawingAfterTool.current = true; setCompactToolsOpen(false);
-        }
-      }}>
+>
       <VerticalWorkspaceLayout compact={compactTimeline} viewer={<div className={`vi-viewer${compareVersion ? ' vi-viewer-comparing' : ''}`}>
         <div className={`vi-video-surface${preview.hand && preview.rect.zoom > 1 ? ' vi-hand-mode' : ''}${preview.panning ? ' vi-panning' : ''}`} ref={surfaceRef} {...preview.events}>
           <video ref={videoRef} style={overlayStyle} muted={muted} src={version.mediaUrl} poster={version.thumbnailUrl || asset.thumbnailUrl} preload="metadata" playsInline
@@ -576,8 +567,9 @@ export function VideoWorkspace({ version, versions, asset, comments, attachments
       <div className="vi-timeline-area">
         <TimelineSeekSurface key={version.id} compact={compactTimeline} durationFrames={durationFrames} frame={frame} disabled={editingLocked} onSeek={seekTimeline}>
         <TimelineMarkers key={version.id} markers={markers} durationFrames={durationFrames} selectedId={selectedCommentId} disabled={editingLocked} onSelect={selectMarker}/>
-        <div className="vi-timeline" ref={timelineRef}>
+        <div className="vi-timeline" ref={timelineRef} data-feedback-category={selectedCategory}>
           <TimelineFilmstrip version={version} enabled={!compactTimeline} />
+          <TimelineSavedRanges markers={markers} durationFrames={durationFrames} activeKey={hasActiveRange && annotationsReadOnly && selectedCommentId ? `${selectedCommentId}-${selectedRangeIndex}` : null}/>
           {hasActiveRange ? <div className="vi-range-selection" data-readonly={annotationsReadOnly} style={{ left: `${safeIn / durationFrames * 100}%`, width: `${(safeOut - safeIn) / durationFrames * 100}%` }} /> : null}
           <div className="vi-playhead" style={{ left: `${frame / durationFrames * 100}%` }}><span /></div>
           {hasActiveRange && annotationsReadOnly ? <><span className="vi-range-boundary vi-range-in" aria-hidden="true" style={{ left: `${safeIn / durationFrames * 100}%` }}/><span className="vi-range-boundary vi-range-out" aria-hidden="true" style={{ left: `${safeOut / durationFrames * 100}%` }}/></> : hasActiveRange ? <><button disabled={editingLocked} className="vi-range-handle vi-range-in" style={{ left: `${safeIn / durationFrames * 100}%` }} role="slider" aria-label="구간 시작 IN" aria-valuemin={0} aria-valuemax={safeOut - 1} aria-valuenow={safeIn} aria-valuetext={`${timecode(safeIn)}, ${safeIn} 프레임`} title="IN · 드래그 또는 방향키로 조절"

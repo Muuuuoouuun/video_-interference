@@ -17,6 +17,7 @@ import { prepareRequestContextBundle } from './context-bundle.mjs';
 import { isVisualOp, visualLayerId } from '../../packages/core/layer-snapshot.mjs';
 import { prepareFilmstrip, readFilmstripCache } from './filmstrip.mjs';
 import { prepareFeedbackExport, selectFeedbackComments } from './feedback-export.mjs';
+import { FEEDBACK_CATEGORIES } from '../../packages/core/feedback-category.mjs';
 import { IMAGE_ATTACHMENT_LIMIT } from '../../packages/core/comment-attachments.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -124,6 +125,7 @@ function createComment(input) {
   const kind = input.kind ?? 'request';
   if (!['request', 'note'].includes(kind)) throw fail('댓글 종류는 request 또는 note로 지정해 주세요.');
   if (input.sceneDescription !== undefined && (typeof input.sceneDescription !== 'string' || input.sceneDescription.length > 500)) throw fail('장면 설명은 500자 이하로 작성해 주세요.');
+  if (input.category !== undefined && !FEEDBACK_CATEGORIES.includes(input.category)) throw fail('피드백 분야를 확인해 주세요.');
   const sceneDescription = input.sceneDescription?.trim();
   if (typeof input.text !== 'string' || input.text.length > 5000) throw fail('요청 문구는 5,000자 이하로 작성해 주세요.');
   const attachments = Array.isArray(input.attachmentIds) ? input.attachmentIds : [];
@@ -132,7 +134,7 @@ function createComment(input) {
   if (input.voiceAssetId && !data.state.attachments.some(a => a.id === input.voiceAssetId && a.role === 'voice')) throw fail('음성 메모를 찾지 못했습니다.');
   const drawings = validateDrawings(input.drawings, { durationFrames: version.durationFrames });
   if (!input.text.trim() && !input.voiceAssetId && !drawings.length && !attachments.length && !(kind === 'note' && sceneDescription)) throw fail('요청 문구나 음성·드로잉·첨부 자료를 추가해 주세요.');
-  const comment = { id: uid('comment'), versionId: version.id, frameIn, frameOut, contextFrame, kind, text: input.text.trim(), ...(sceneDescription ? { sceneDescription } : {}), drawings, attachmentIds: attachments, ...(input.voiceAssetId ? { voiceAssetId: input.voiceAssetId } : {}), status: 'received', createdAt: now(), sourceRanges: mapToSource(version.timelineMap, frameIn, frameOut) };
+  const comment = { id: uid('comment'), versionId: version.id, frameIn, frameOut, contextFrame, kind, ...(kind !== 'note' && input.category !== undefined ? { category: input.category } : {}), text: input.text.trim(), ...(sceneDescription ? { sceneDescription } : {}), drawings, attachmentIds: attachments, ...(input.voiceAssetId ? { voiceAssetId: input.voiceAssetId } : {}), status: 'received', createdAt: now(), sourceRanges: mapToSource(version.timelineMap, frameIn, frameOut) };
   data.state.comments.push(comment); save(); return comment;
 }
 
@@ -172,17 +174,23 @@ function editComment(comment, input, workspace) {
   assertVisibleComment(comment); assertCommentIdle(comment, workspace);
   if (comment.layerChange) throw fail('그래픽 수정·제거 요청은 편집 값에서 수정해 주세요.', 409);
   if (hasAppliedComment(comment, workspace)) throw fail('이미 적용한 피드백은 수정할 수 없습니다. 현재 버전에서 새 피드백을 남겨 주세요.', 409);
-  if (!input || typeof input !== 'object' || Array.isArray(input) || !Object.keys(input).length || Object.keys(input).some(key => !['text', 'sceneDescription'].includes(key))) throw fail('피드백 문구와 장면 설명만 수정할 수 있습니다.');
+  if (!input || typeof input !== 'object' || Array.isArray(input) || !Object.keys(input).length || Object.keys(input).some(key => !['text', 'sceneDescription', 'category'].includes(key))) throw fail('피드백 문구·장면 설명·분야만 수정할 수 있습니다.');
   if (input.text !== undefined && (typeof input.text !== 'string' || input.text.length > 5000)) throw fail('피드백 문구는 5,000자 이하로 작성해 주세요.');
   if (input.sceneDescription !== undefined && (typeof input.sceneDescription !== 'string' || input.sceneDescription.length > 500)) throw fail('장면 설명은 500자 이하로 작성해 주세요.');
+  if (input.category !== undefined && (!FEEDBACK_CATEGORIES.includes(input.category) || comment.kind === 'note')) throw fail('피드백 분야를 확인해 주세요.');
   const text = input.text === undefined ? comment.text : input.text.trim();
   const sceneDescription = input.sceneDescription === undefined ? comment.sceneDescription : input.sceneDescription.trim();
   if (!text && !comment.voiceAssetId && !comment.drawings.length && !comment.attachmentIds.length && !(comment.kind === 'note' && sceneDescription)) throw fail('피드백 문구나 음성·드로잉·첨부 자료를 추가해 주세요.');
   if (text.length + (comment.supplements ?? []).reduce((sum, item) => sum + item.text.length, 0) > 20_000) throw fail('원문과 추가 지시의 합계는 20,000자 이하여야 합니다.');
-  if (text === comment.text && (sceneDescription || '') === (comment.sceneDescription || '')) return comment;
+  const contentChanged = text !== comment.text || (sceneDescription || '') !== (comment.sceneDescription || '');
+  if (!contentChanged) {
+    if (input.category !== undefined && input.category !== (comment.category ?? 'video')) { comment.category = input.category; save(); }
+    return comment;
+  }
   const editedAt = now();
   comment.revisions = [...(comment.revisions ?? []), { id: uid('revision'), text: comment.text, ...(comment.sceneDescription ? { sceneDescription: comment.sceneDescription } : {}), editedAt }];
   comment.text = text; comment.updatedAt = editedAt;
+  if (input.category !== undefined) comment.category = input.category;
   if (sceneDescription) comment.sceneDescription = sceneDescription; else delete comment.sceneDescription;
   workspace.ops = workspace.ops.filter(op => op.commentId !== comment.id);
   comment.status = 'received'; delete comment.clarification;

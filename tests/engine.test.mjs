@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import sharp from 'sharp';
 import { ffmpegPath, run, probe, renderVideo, mapToSource, compileTimeline, createGraphic } from '../apps/worker/engine.mjs';
 import { interpretLocal, validateAiResponse } from '../apps/worker/interpreter.mjs';
+import { createTextDrawing } from '../packages/core/overlay-text.mjs';
 import { validateDrawings } from '../apps/worker/drawings.mjs';
 
 const work = await mkdtemp(join(tmpdir(), 'video-interference-engine-'));
@@ -184,6 +185,21 @@ await test('drawing validation preserves legacy annotations and rejects malforme
   for (const bad of [{ ...legacy, opacity: 2 }, { ...legacy, strokeWidth: 0 }, { ...legacy, fill: 'url(file:///etc/passwd)' }, { ...legacy, color: '#000000"/>' }, { ...legacy, points: [{ x: -1, y: 0 }, { x: 0, y: 0 }] }, { ...legacy, points: [] }, { ...legacy, script: 'anything' }]) assert.throws(() => validateDrawings([bad]));
   const stress = Array.from({ length: 30 }, (_, i) => ({ ...op('overlay', i + 1, i + 2, { kind: 'drawing', drawings: [legacy] }), id: `d${i}` }));
   assert.equal(compileTimeline(180, stress).length, 1);
+});
+
+await test('native FFmpeg renders Korean and escaped text annotations only inside the approved range', async () => {
+  const drawing = createTextDrawing({ id: 'native-text', text: '한글 메모 <&>\nTEXT', point: { x: .1, y: .15 }, style: { color: '#FFFFFF' }, fontSize: 110, logicalHeight: 562.5 });
+  const result = await render('text-annotation', [op('overlay', 30, 60, { kind: 'drawing', drawings: [drawing] })]);
+  const extract = async frame => {
+    const path = join(work, `text-frame-${frame}.png`);
+    await run(ffmpegPath, ['-y', '-hide_banner', '-loglevel', 'error', '-i', result.outputPath, '-vf', `select=eq(n\\,${frame})`, '-frames:v', '1', path]);
+    return sharp(path).removeAlpha().raw().toBuffer();
+  };
+  const before = await extract(20), during = await extract(40), after = await extract(70);
+  const whites = buffer => { let count = 0; for (let i = 0; i < buffer.length; i += 3) if (buffer[i] > 180 && buffer[i + 1] > 180 && buffer[i + 2] > 180) count++; return count; };
+  assert.equal(whites(before), 0); assert.equal(whites(after), 0);
+  assert.ok(whites(during) > 100, 'native output must contain real text pixels, not just saved metadata');
+  assert.equal(result.durationFrames, 180);
 });
 
 await rm(work, { recursive: true, force: true });

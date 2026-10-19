@@ -719,7 +719,8 @@ await test('feedback edit, trash and restore preserve materials, invalidate appr
   const image = await upload('reference', 'reference.png', await sharp({ create: { width: 40, height: 40, channels: 4, background: '#FFFF00' } }).png().toBuffer());
   const voice = await upload('voice', 'voice.mp4', bytes);
   const drawing = { id: 'saved-drawing', kind: 'rect', color: '#FFFF00', points: [{ x: 0.1, y: 0.1 }, { x: 0.4, y: 0.4 }], frame: 15 };
-  const original = (await request('/api/comments', 'POST', { versionId, frameIn: 10, frameOut: 40, contextFrame: 15, text: '2배속', sceneDescription: '첫 장면', drawings: [drawing], attachmentIds: [image.id], voiceAssetId: voice.id })).value;
+  const original = (await request('/api/comments', 'POST', { versionId, frameIn: 10, frameOut: 40, contextFrame: 15, category: 'subtitle', text: '2배속', sceneDescription: '첫 장면', drawings: [drawing], attachmentIds: [image.id], voiceAssetId: voice.id })).value;
+  assert.equal((await request('/api/comments', 'POST', { versionId, frameIn: 0, text: '잘못된 분야', category: 'unknown' })).status, 400);
   const path = `/api/comments/${original.id}`;
   const supplemented = (await request(`${path}/supplements`, 'POST', { text: '2배속으로 부탁해' })).value;
   const initialOp = (await request(`${path}/interpret`, 'POST', {})).value.ops[0]; assert.ok(initialOp);
@@ -727,8 +728,18 @@ await test('feedback edit, trash and restore preserve materials, invalidate appr
   const approved = (await request('/api/state')).value;
   assert.equal((await request(path, 'PATCH', { text: original.text, sceneDescription: original.sceneDescription })).status, 200);
   assert.deepEqual((await request('/api/state')).value, approved, 'no-op save must keep approval and avoid a false revision');
-  for (const patch of [{}, { text: null }, { text: 'x'.repeat(5001) }, { sceneDescription: null }, { sceneDescription: 'x'.repeat(501) }, { text: '새 문구', frameIn: 0 }, { drawings: [] }]) {
+  for (const patch of [{}, { text: null }, { text: 'x'.repeat(5001) }, { sceneDescription: null }, { sceneDescription: 'x'.repeat(501) }, { text: '새 문구', frameIn: 0 }, { drawings: [] }, { category: 'invalid' }, { category: null }]) {
     assert.equal((await request(path, 'PATCH', patch)).status, 400); assert.deepEqual((await request('/api/state')).value, approved);
+  }
+  assert.equal(original.category, 'subtitle');
+  const anchorsBefore = { frameIn: original.frameIn, frameOut: original.frameOut, sourceRanges: original.sourceRanges };
+  for (const category of ['video', 'subtitle', 'audio', 'effect']) {
+    const categorized = await request(path, 'PATCH', { category }); assert.equal(categorized.status, 200);
+    assert.equal(categorized.value.category, category);
+    assert.equal(categorized.value.updatedAt, original.updatedAt);
+    assert.deepEqual(categorized.value.revisions, original.revisions, 'category-only edits do not rewrite content history');
+    assert.deepEqual({ frameIn: categorized.value.frameIn, frameOut: categorized.value.frameOut, sourceRanges: categorized.value.sourceRanges }, anchorsBefore);
+    assert.deepEqual((await request('/api/state')).value.ops, approved.ops, 'choosing a pin color must preserve approval');
   }
   const edited = await request(path, 'PATCH', { text: '  3배속  ', sceneDescription: '  진행자가 등장  ' }); assert.equal(edited.status, 200);
   assert.equal(edited.value.text, '3배속'); assert.equal(edited.value.sceneDescription, '진행자가 등장'); assert.equal(edited.value.status, 'received'); assert.ok(edited.value.updatedAt);
@@ -736,7 +747,8 @@ await test('feedback edit, trash and restore preserve materials, invalidate appr
   for (const key of ['id', 'versionId', 'frameIn', 'frameOut', 'contextFrame', 'kind', 'drawings', 'attachmentIds', 'voiceAssetId', 'sourceRanges', 'createdAt', 'supplements']) assert.deepEqual(edited.value[key], supplemented[key], `${key} must survive a text edit`);
   assert.equal((await request('/api/state')).value.ops.length, 0); assert.equal((await request(`/api/ops/${initialOp.id}`, 'PATCH', { status: 'approved' })).status, 404);
   const brief = await request('/api/feedback-exports', 'POST', { versionId, commentIds: [original.id] }); assert.equal(brief.status, 200);
-  const briefBefore = await (await fetch(`${base}${brief.value.manifestUrl}`)).text(); assert.equal(JSON.parse(briefBefore).feedback[0].feedback.original, '3배속');
+  const briefBefore = await (await fetch(`${base}${brief.value.manifestUrl}`)).text(); assert.equal(JSON.parse(briefBefore).feedback[0].feedback.original, '3배속'); assert.equal(JSON.parse(briefBefore).feedback[0].category, 'effect');
+  assert.match(await (await fetch(`${base}${brief.value.markdownUrl}`)).text(), /분야: 효과/);
   const textOnly = (await request('/api/comments', 'POST', { versionId, frameIn: 0, text: '2배속' })).value;
   assert.equal((await request(`/api/comments/${textOnly.id}`, 'PATCH', { text: '', sceneDescription: '설명만 남김' })).status, 400, 'a request must retain feedback, not merely its scene');
   const memo = (await request('/api/comments', 'POST', { versionId, frameIn: 45, kind: 'note', text: '참고', sceneDescription: '메모 장면' })).value;

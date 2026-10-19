@@ -69,18 +69,19 @@
 .vi-workspace[data-timeline-compact="true"] .vi-filmstrip { display: none; }
 .vi-workspace[data-timeline-compact="true"] .vi-playhead { top: 8px; height: 16px; width: 2px; background: #3d4a60; box-shadow: none; }
 .vi-workspace[data-timeline-compact="true"] .vi-playhead > span { display: none; }
-.vi-workspace[data-timeline-compact="true"] .vi-range-selection { top: 12px; bottom: auto; height: 7px; border: 0; border-radius: 2px; background: #91a6ce; z-index: 2; }
+.vi-workspace[data-timeline-compact="true"] .vi-range-selection { top: 12px; bottom: auto; height: 7px; border: 0; border-radius: 2px; background: var(--pin-color, #91a6ce); z-index: 2; }
+.vi-workspace[data-timeline-compact="true"] .vi-range-selection::before { display: none; }
 .vi-workspace[data-timeline-compact="true"] .vi-range-boundary { top: 9px; bottom: 9px; }
 .vi-workspace[data-timeline-compact="true"] .vi-range-handle { top: 0; height: 32px; }
 .vi-workspace[data-timeline-compact="true"] .vi-range-handle::before { height: 14px; margin-top: 9px; }
 .vi-workspace[data-timeline-compact="true"] .vi-range-handle::after { height: 12px; width: 6px; border-width: 1px; }
 .vi-workspace[data-timeline-compact="true"] .vi-marker-rail { position: absolute; inset: 0; height: 32px; margin: 0; pointer-events: none; }
-.vi-workspace[data-timeline-compact="true"] .vi-comment-marker { height: 32px; border: 0; padding: 0; background: transparent; box-shadow: none; pointer-events: auto; }
-.vi-workspace[data-timeline-compact="true"] .vi-comment-marker:is(:hover, .vi-comment-selected, [aria-expanded="true"]) { background: transparent; border-color: transparent; box-shadow: none; }
-.vi-workspace[data-timeline-compact="true"] .vi-comment-marker::before { content: ''; position: absolute; left: var(--marker-anchor, 50%); transform: translateX(-50%); width: 7px; height: 7px; border-radius: 50%; background: #738198; box-shadow: 0 0 0 2px var(--surface); }
+.vi-workspace[data-timeline-compact="true"] .vi-comment-marker { top: 0; transform: translateX(-50%); height: 32px; border: 0; padding: 0; background: transparent; box-shadow: none; pointer-events: auto; }
+.vi-workspace[data-timeline-compact="true"] .vi-comment-marker:is(:hover, .vi-comment-selected, [aria-expanded="true"]) { transform: translateX(-50%); background: transparent; border-color: transparent; box-shadow: none; }
+.vi-workspace[data-timeline-compact="true"] .vi-comment-marker::before { content: ''; position: absolute; top: 12px; left: var(--marker-anchor, 50%); transform: translateX(-50%); width: 7px; height: 7px; border: 0; border-radius: 50%; background: var(--pin-color); box-shadow: 0 0 0 2px var(--surface); }
 .vi-workspace[data-timeline-compact="true"] .vi-comment-marker::after { display: none; }
 .vi-workspace[data-timeline-compact="true"] .vi-comment-marker.vi-comment-selected::before,
-.vi-workspace[data-timeline-compact="true"] .vi-comment-marker:is(:hover, :focus-visible, [aria-expanded="true"])::before { background: #4669a6; }
+.vi-workspace[data-timeline-compact="true"] .vi-comment-marker:is(:hover, :focus-visible, [aria-expanded="true"])::before { background: var(--pin-color); box-shadow: 0 0 0 3px var(--pin-soft), 0 0 0 4px var(--pin-color); }
 .vi-workspace[data-timeline-compact="true"] .vi-comment-marker > span { opacity: 0; pointer-events: none; }
 .vi-workspace[data-timeline-compact="true"] .vi-comment-marker:is(:hover, :focus-visible, [aria-expanded="true"]) > span { opacity: 1; transform: translateY(-22px); background: var(--surface); padding: 3px; border-radius: 3px; }
 .vi-workspace[data-timeline-compact="true"] .vi-marker-picker { pointer-events: auto; }

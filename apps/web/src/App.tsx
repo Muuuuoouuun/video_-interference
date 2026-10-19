@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FolderOpen, Play, ShieldCheck, Layers, Film, Download, Columns2, X, LoaderCircle, Info, Package, Square, Keyboard, Trash2, RotateCcw, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, SquarePen, CornerUpLeft, MoreHorizontal } from 'lucide-react';
-import type { AppState, BootstrapState, Comment, Drawing, EditOp, FeedbackExportResult, InterpretResult, LayerChangeInput, LayerChangeResult, Project, RenderJob, RenderLayer, Version } from '../../../packages/core/types';
+import type { AppState, BootstrapState, Comment, Drawing, EditOp, FeedbackExportResult, FeedbackCategory, InterpretResult, LayerChangeInput, LayerChangeResult, Project, RenderJob, RenderLayer, Version } from '../../../packages/core/types';
 import { confirmedMutation } from '../../../packages/core/confirmed-mutation.mjs';
 import { projectComment } from '../../../packages/core/comment-projection.mjs';
 import { createProjectedRequestDraft, planPlayerCompose } from '../../../packages/core/request-draft.mjs';
@@ -164,7 +164,7 @@ export function App() {
     try { await mutate(async () => { const comment = await api<Comment>(`/api/comments/${id}/supplements`, 'POST', { text }); setData(state => state ? { ...state, comments: state.comments.map(item => item.id === id ? comment : item), ops: state.ops.filter(op => op.commentId !== id) } : state); }); setNotice('보완 내용을 저장했습니다. 내보낼 피드백에 함께 포함됩니다.'); return true; }
     catch { return false; }
   }, [mutate]);
-  const onEditComment = useCallback(async (id: string, patch: { text: string; sceneDescription: string }) => {
+  const onEditComment = useCallback(async (id: string, patch: { text: string; sceneDescription: string; category?: FeedbackCategory }) => {
     if (feedbackMutationInFlight.current) return false;
     feedbackMutationInFlight.current = true;
     try {
@@ -206,7 +206,7 @@ export function App() {
     const target = anchor ?? range;
     await mutate(async () => {
       const anchoredDrawings = (anchor?.drawings ?? drawings).map(drawing => ({ ...drawing, frame: drawingFrame(drawing, anchor?.contextFrame ?? drawingContext.current) }));
-      const comment = await api<Comment>('/api/comments', 'POST', { versionId: version.id, frameIn: target.in, frameOut: target.out, contextFrame: anchor?.contextFrame ?? currentFrame, kind: options.kind, sceneDescription: options.sceneDescription, text, drawings: anchoredDrawings, attachmentIds, voiceAssetId });
+      const comment = await api<Comment>('/api/comments', 'POST', { versionId: version.id, frameIn: target.in, frameOut: target.out, contextFrame: anchor?.contextFrame ?? currentFrame, kind: options.kind, category: options.category, sceneDescription: options.sceneDescription, text, drawings: anchoredDrawings, attachmentIds, voiceAssetId });
       setData(state => state ? { ...state, comments: [...state.comments, comment] } : state);
       setSelectedId(comment.id); setSelectedRangeIndex(0); setDrawings([]); resetDrawingHistory(); setRange({ in: comment.frameIn, out: comment.frameOut });
       drawingContext.current = comment.contextFrame ?? comment.frameIn; draftFrame.current = drawingContext.current; setCurrentFrame(drawingContext.current); setFocusFrameToken(token => token + 1);

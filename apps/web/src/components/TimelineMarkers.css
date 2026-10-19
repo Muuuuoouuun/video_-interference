@@ -1,12 +1,15 @@
-.vi-marker-rail { position: relative; height: 34px; margin: 3px 0 4px; z-index: 9; }
-.vi-marker-rail .vi-comment-marker { position: absolute; top: 0; z-index: 1; transform: translateX(-50%); height: 28px; min-width: 0; padding: 0 4px; gap: 3px; display: inline-flex; align-items: center; justify-content: center; color: var(--text-secondary); background: var(--surface); border: 1px solid #aeb7c5; border-radius: 6px; font-size: 11px; font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums; cursor: pointer; transition: background-color .12s, border-color .12s; }
-.vi-marker-rail .vi-comment-marker::after { content: ''; position: absolute; top: calc(100% + 1px); left: var(--marker-stem, 50%); height: 5px; width: 1px; background: #aeb7c5; pointer-events: none; }
-.vi-marker-rail .vi-comment-marker:hover:not(:disabled) { color: var(--text); background: var(--surface-muted); border-color: #78869b; z-index: 2; }
-.vi-marker-rail .vi-comment-marker.vi-comment-selected, .vi-marker-rail .vi-comment-marker[aria-expanded="true"] { color: #3154aa; background: #edf2ff; border-color: #7590ce; box-shadow: inset 0 -2px #7590ce; z-index: 3; }
-.vi-marker-rail .vi-comment-selected::after { background: #7590ce; }
-.vi-marker-rail .vi-comment-marker:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; z-index: 4; }
+.vi-marker-rail { position: relative; height: 38px; margin: 3px 0 4px; z-index: 9; }
+.vi-marker-rail .vi-comment-marker { position: absolute; top: 1px; z-index: 1; transform: translateX(-50%); height: 28px; min-width: 0; padding: 0 5px; gap: 3px; display: inline-flex; align-items: center; justify-content: center; color: var(--pin-ink); background: var(--pin-soft); border: 1.5px solid var(--pin-color); border-radius: 15px; font-size: 11px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; cursor: pointer; box-shadow: 0 2px 4px rgb(var(--pin-rgb) / 16%); transition: background-color .12s, box-shadow .12s, transform .12s; }
+.vi-marker-rail .vi-comment-marker::before { content: ''; position: absolute; top: 22px; left: var(--marker-anchor, 50%); width: 7px; height: 7px; transform: translateX(-50%) rotate(45deg); background: var(--pin-soft); border-right: 1.5px solid var(--pin-color); border-bottom: 1.5px solid var(--pin-color); border-radius: 0 0 2px 0; pointer-events: none; }
+.vi-marker-rail .vi-comment-marker::after { content: ''; position: absolute; top: 33px; left: var(--marker-anchor, 50%); width: 4px; height: 4px; transform: translateX(-50%); background: var(--pin-color); border-radius: 50%; box-shadow: 0 0 0 2px var(--surface); pointer-events: none; }
+.vi-marker-rail .vi-marker-number { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 2px; background: transparent; }
+.vi-marker-rail .vi-comment-marker[data-mixed="true"] { box-shadow: 0 2px 4px rgb(var(--pin-rgb) / 16%), 2px -2px 0 -1px #fff, 3px -3px 0 -1px var(--pin-color); }
+.vi-marker-rail .vi-comment-marker:hover:not(:disabled) { transform: translateX(-50%) translateY(-2px); box-shadow: 0 4px 7px rgb(var(--pin-rgb) / 25%); z-index: 2; }
+.vi-marker-rail .vi-comment-marker.vi-comment-selected, .vi-marker-rail .vi-comment-marker[aria-expanded="true"] { background: var(--pin-soft); color: var(--pin-ink); box-shadow: 0 0 0 3px rgb(var(--pin-rgb) / 18%), 0 3px 6px rgb(var(--pin-rgb) / 24%); z-index: 3; }
+.vi-marker-rail .vi-comment-marker:is(.vi-comment-selected, [aria-expanded="true"])::before { background: var(--pin-soft); }
+.vi-marker-rail .vi-comment-marker:focus-visible { outline: 2px solid var(--pin-ink); outline-offset: 3px; z-index: 4; }
 .vi-marker-rail .vi-comment-marker:disabled { cursor: default; opacity: .55; }
-.vi-marker-count { font-size: 10px; color: var(--muted); font-weight: 500; }
+.vi-marker-count { font-size: 10px; color: var(--pin-ink); font-weight: 600; }
 .vi-marker-picker { position: fixed; z-index: 1000; display: flex; flex-direction: column; box-sizing: border-box; width: min(280px, calc(100vw - 16px)); max-width: calc(100vw - 16px); padding: 6px; overflow: hidden; color: var(--text); background: var(--surface); border: 1px solid var(--border-strong); border-radius: 10px; box-shadow: 0 6px 24px #202b441c; }
 .vi-marker-picker button { cursor: pointer; }
 .vi-marker-picker button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
@@ -17,12 +20,14 @@
 .vi-marker-choices { min-height: 0; max-height: 200px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
 .vi-marker-choices > button { display: flex; align-items: flex-start; gap: 9px; width: 100%; min-width: 0; padding: 8px 6px; border: 1px solid transparent; border-radius: 6px; text-align: left; color: var(--text-secondary); background: transparent; }
 .vi-marker-choices > button:hover, .vi-marker-choices > button:focus-visible { background: var(--surface-muted); }
-.vi-marker-choices > button[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent-border); }
+.vi-marker-choices > button[aria-pressed="true"] { background: var(--pin-soft); border-color: var(--pin-color); }
 .vi-marker-choices > button:focus-visible { outline-offset: -2px; }
-.vi-picker-number { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; min-width: 22px; height: 22px; padding: 0 3px; color: var(--text-secondary); background: var(--surface); border: 1px solid #b9c1cd; border-radius: 5px; font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.vi-picker-number { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; min-width: 22px; height: 22px; padding: 0 3px; color: var(--pin-ink); background: var(--pin-soft); border: 1px solid var(--pin-color); border-radius: 50%; font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .vi-picker-copy { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
 .vi-picker-time { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; font-size: 11px; font-family: var(--time-font); font-variant-numeric: tabular-nums; line-height: 1.5; }
 .vi-picker-time > svg { flex-shrink: 0; color: var(--muted); }
 .vi-picker-time small { color: var(--muted); font-family: inherit; font-size: 10px; }
 .vi-picker-summary { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; line-height: 1.5; }
 @media (prefers-reduced-motion: reduce) { .vi-marker-rail .vi-comment-marker { transition: none; } }
+
+.vi-marker-rail .vi-comment-marker.vi-comment-selected .vi-marker-number { font-weight: 800; }

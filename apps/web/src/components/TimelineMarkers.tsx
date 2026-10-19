@@ -4,7 +4,9 @@ import { createPortal } from 'react-dom';
 import { Brackets, Clock3, X } from 'lucide-react';
 import type { Comment } from '../../../../packages/core/types';
 import { layoutTimelineMarkers } from '../../../../packages/core/timeline-markers.mjs';
+import { feedbackCategory, FEEDBACK_CATEGORY_LABELS } from '../../../../packages/core/feedback-category.mjs';
 import { time } from '../format';
+import './FeedbackCategory.css';
 import './TimelineMarkers.css';
 
 export interface FeedbackMarker {
@@ -20,6 +22,20 @@ function kind(marker: FeedbackMarker) { return marker.comment.kind === 'note' ? 
 function summary(marker: FeedbackMarker) { return marker.comment.text || marker.comment.sceneDescription || '그림·첨부 자료'; }
 function range(marker: FeedbackMarker) { return marker.frameOut - marker.frame === 1 ? time(marker.frame) : `${time(marker.frame)} – ${time(marker.frameOut)}`; }
 function label(marker: FeedbackMarker) { return `${kind(marker)} ${marker.number}${marker.rangeCount > 1 ? ` 구간 ${marker.rangeIndex + 1}` : ''}: ${time(marker.frame)} ${summary(marker)}`; }
+
+// Keep saved spans mounted independently of the draft/selected range. Exact
+// projected endpoints remain separate even when nearby number badges cluster.
+export const TimelineSavedRanges = memo(function TimelineSavedRanges({ markers, durationFrames, activeKey }: {
+  markers: FeedbackMarker[]; durationFrames: number; activeKey: string | null;
+}) {
+  if (!(durationFrames > 0)) return null;
+  return <div className="vi-saved-ranges" aria-hidden="true">
+    {markers.map(marker => marker.frameOut - marker.frame > 1 && marker.key !== activeKey ? <span
+      key={marker.key} className="vi-range-selection vi-saved-range" data-marker-key={marker.key} data-feedback-category={feedbackCategory(marker.comment)}
+      style={{ left: `${marker.frame / durationFrames * 100}%`, width: `${(marker.frameOut - marker.frame) / durationFrames * 100}%` }}/>
+      : null)}
+  </div>;
+});
 
 export const TimelineMarkers = memo(function TimelineMarkers({ markers, durationFrames, selectedId, disabled, onSelect }: Props) {
   const railRef = useRef<HTMLDivElement>(null);
@@ -104,13 +120,17 @@ export const TimelineMarkers = memo(function TimelineMarkers({ markers, duration
       const selected = group.items.find(marker => marker.comment.id === selectedId);
       const shown = selected ?? group.items[0];
       const grouped = group.items.length > 1;
+      const category = feedbackCategory(shown.comment);
+      const categories = [...new Set(group.items.map(marker => feedbackCategory(marker.comment)))];
       return <button key={group.key} type="button" disabled={disabled}
         className={`vi-comment-marker${selected ? ' vi-comment-selected' : ''}`}
+        data-feedback-category={category} data-mixed={categories.length > 1}
         style={{ left: `${group.left}px`, width: group.width, '--marker-anchor': `${group.anchor - group.left + group.width / 2}px`, '--marker-stem': `${group.anchor - group.left + group.width / 2 - 1}px` } as CSSProperties}
         aria-label={grouped ? `가까운 마커 ${group.items.length}개 · ${group.items.map(marker => `${kind(marker)} ${marker.number}`).join(', ')}` : label(shown)}
         aria-pressed={grouped ? undefined : Boolean(selected)} aria-expanded={grouped ? openKey === group.key : undefined}
+        aria-description={`${categories.map(item => FEEDBACK_CATEGORY_LABELS[item]).join('·')} 분야`}
         aria-controls={grouped && openKey === group.key ? pickerId : undefined}
-        title={grouped ? `${group.items.length}개 마커 · 눌러서 선택` : `${kind(shown)} ${shown.number} · ${range(shown)} · ${summary(shown)}`}
+        title={grouped ? `${categories.map(item => FEEDBACK_CATEGORY_LABELS[item]).join('·')} · ${group.items.length}개 마커 · 눌러서 선택` : `${kind(shown)} ${shown.number} · ${range(shown)} · ${summary(shown)} · ${FEEDBACK_CATEGORY_LABELS[category]}`}
         onClick={event => {
           if (!grouped) { close(false); onSelect(shown); return; }
           triggerRef.current = event.currentTarget;
@@ -130,9 +150,9 @@ export const TimelineMarkers = memo(function TimelineMarkers({ markers, duration
         const index = choices.indexOf(document.activeElement as HTMLButtonElement);
         const next = event.key === 'Home' ? 0 : event.key === 'End' ? choices.length - 1 : (index + (event.key === 'ArrowDown' ? 1 : -1) + choices.length) % choices.length;
         choices[next]?.focus();
-      }}>{openGroup.items.map(marker => <button key={marker.key} type="button" data-marker-choice aria-label={label(marker)} aria-pressed={marker.comment.id === selectedId}
+      }}>{openGroup.items.map(marker => <button key={marker.key} type="button" data-marker-choice data-feedback-category={feedbackCategory(marker.comment)} aria-label={label(marker)} aria-pressed={marker.comment.id === selectedId}
         onClick={() => { close(); onSelect(marker); }}>
-        <span className="vi-picker-number">{marker.number}</span><span className="vi-picker-copy"><span className="vi-picker-time">{marker.frameOut - marker.frame === 1 ? <Clock3 size={12}/> : <Brackets size={12}/>}<span>{range(marker)}</span>{marker.rangeCount > 1 ? <small>구간 {marker.rangeIndex + 1}</small> : null}</span><span className="vi-picker-summary">{summary(marker)}</span></span>
+        <span className="vi-picker-number">{marker.number}</span><span className="vi-picker-copy"><span className="vi-picker-time">{marker.frameOut - marker.frame === 1 ? <Clock3 size={12}/> : <Brackets size={12}/>}<span>{range(marker)}</span>{marker.rangeCount > 1 ? <small>구간 {marker.rangeIndex + 1}</small> : null}<span className="feedback-category-label"><span className="feedback-category-dot" aria-hidden="true"/>{FEEDBACK_CATEGORY_LABELS[feedbackCategory(marker.comment)]}</span></span><span className="vi-picker-summary">{summary(marker)}</span></span>
       </button>)}</div>
     </div>, document.body) : null}
   </div>;

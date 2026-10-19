@@ -16,7 +16,7 @@ function sameRegion(left, right) {
 
 /** Includes stacking order through drawingsEqual; no serialization or coordinate allocation. */
 export function drawingEqual(left, right, fallbackFrame) {
-  return left === right || Boolean(left && right && left.id === right.id && left.kind === right.kind &&
+  return left === right || Boolean(left && right && left.id === right.id && left.kind === right.kind && left.text === right.text &&
     drawingFrame(left, fallbackFrame) === drawingFrame(right, fallbackFrame) && left.color === right.color &&
     (left.strokeWidth ?? 3) === (right.strokeWidth ?? 3) && (left.opacity ?? 1) === (right.opacity ?? 1) &&
     (left.fill ?? 'none') === (right.fill ?? 'none') && sameRegion(left.region, right.region) && samePoints(left.points, right.points));
