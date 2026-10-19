@@ -58,6 +58,9 @@ export function usePreviewViewport(surface: RefObject<HTMLDivElement | null>, ba
     return () => target.removeEventListener('wheel', wheel);
   }, [surface, cancelPan]);
   function begin(event: ReactPointerEvent<HTMLDivElement>) {
+    // React portals bubble through this surface even when their DOM is in the
+    // timeline toolbar. Only gestures physically inside the video may pan it.
+    if (!(event.target instanceof Node) || !event.currentTarget.contains(event.target)) return;
     if (latest.current.rect.zoom <= 1 || (event.button !== 1 && !(event.button === 0 && latest.current.hand))) return;
     event.preventDefault(); event.stopPropagation(); cancelPan(); latest.current.onPanStart();
     const { zoom, x, y } = latest.current.rect;
@@ -90,6 +93,7 @@ export function usePreviewViewport(surface: RefObject<HTMLDivElement | null>, ba
     onPointerCancelCapture: (event: ReactPointerEvent<HTMLDivElement>) => finish(event, false),
     onLostPointerCapture: (event: ReactPointerEvent<HTMLDivElement>) => finish(event, false),
     onClickCapture: (event: ReactMouseEvent<HTMLDivElement>) => {
+      if (!(event.target instanceof Node) || !event.currentTarget.contains(event.target)) return;
       if (suppressClick.current || latest.current.hand && latest.current.rect.zoom > 1) { suppressClick.current = false; event.preventDefault(); event.stopPropagation(); }
     }
   } };

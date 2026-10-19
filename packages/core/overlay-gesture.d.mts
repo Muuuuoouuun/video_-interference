@@ -2,6 +2,7 @@ import type { Drawing, Point } from './types';
 import type { DrawingHandle } from './overlay-geometry.mjs';
 
 export interface OverlayGesture {
+  translation(): Point | null;
   update(point: Point, samples?: Point[]): void;
   flush(): Drawing;
   finish(): Drawing;

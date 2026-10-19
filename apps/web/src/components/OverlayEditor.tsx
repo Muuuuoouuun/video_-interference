@@ -56,20 +56,20 @@ interface OverlayEditorProps {
 const Shape = memo(function Shape({ drawing, logicalHeight, displayScale }: { drawing: Drawing; logicalHeight: number; displayScale: number }) {
   const points = drawing.points;
   const start = points[0], end = points[points.length - 1];
-  const linePoints = useMemo(() => points.map((point) => `${(point.x * 1000).toFixed(2)},${(point.y * logicalHeight).toFixed(2)}`).join(' '), [points, logicalHeight]);
+  const linePoints = useMemo(() => drawing.kind === 'pen' ? points.map((point) => `${(point.x * 1000).toFixed(2)},${(point.y * logicalHeight).toFixed(2)}`).join(' ') : '', [drawing.kind, points, logicalHeight]);
   const arrowPoints = useMemo(() => drawing.kind === 'arrow' && start && end ? arrowHeadPoints({ x: start.x * 1000, y: start.y * logicalHeight }, { x: end.x * 1000, y: end.y * logicalHeight }, drawing.strokeWidth ?? 3).map((point) => `${point.x},${point.y}`).join(' ') : null, [drawing.kind, drawing.strokeWidth, start, end, logicalHeight]);
-  const region = drawing.region || drawingBounds(drawing);
+  const region = drawing.region || (drawing.kind === 'rect' || drawing.kind === 'ellipse' ? drawingBounds(drawing) : null);
   if ((!start || !end) && drawing.kind !== 'rect' && drawing.kind !== 'ellipse') return null;
   const common = { stroke: drawing.color, strokeWidth: drawing.strokeWidth ?? 3, fill: 'none', strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const };
   // Hit strokes use screen pixels; artwork uses the logical 1000-unit canvas.
   const hitStyle = { strokeWidth: Math.max(14, (drawing.strokeWidth ?? 3) * displayScale) };
-  const shape = drawing.kind === 'rect' ? <rect {...common} x={region.x * 1000} y={region.y * logicalHeight} width={region.w * 1000} height={region.h * logicalHeight} fill={drawing.fill || 'none'} />
-    : drawing.kind === 'ellipse' ? <ellipse {...common} cx={(region.x + region.w / 2) * 1000} cy={(region.y + region.h / 2) * logicalHeight} rx={region.w * 500} ry={region.h * logicalHeight / 2} fill={drawing.fill || 'none'} />
+  const shape = drawing.kind === 'rect' && region ? <rect {...common} x={region.x * 1000} y={region.y * logicalHeight} width={region.w * 1000} height={region.h * logicalHeight} fill={drawing.fill || 'none'} />
+    : drawing.kind === 'ellipse' && region ? <ellipse {...common} cx={(region.x + region.w / 2) * 1000} cy={(region.y + region.h / 2) * logicalHeight} rx={region.w * 500} ry={region.h * logicalHeight / 2} fill={drawing.fill || 'none'} />
       : drawing.kind === 'pen' ? points.length === 1 ? <circle cx={start.x * 1000} cy={start.y * logicalHeight} r={(drawing.strokeWidth ?? 3) / 2} fill={drawing.color} /> : <polyline {...common} points={linePoints} />
         : <g><line {...common} x1={start.x * 1000} y1={start.y * logicalHeight} x2={end.x * 1000} y2={end.y * logicalHeight} />{arrowPoints ? <polygon points={arrowPoints} fill={drawing.color} /> : null}</g>;
   return <g data-drawing-id={drawing.id} className="oe-shape">
     <g className="oe-artwork" opacity={drawing.opacity ?? 1}>{shape}</g>
-    {drawing.kind === 'rect' || drawing.kind === 'ellipse' ? <rect className="oe-hit oe-hit-area" style={hitStyle} x={region.x * 1000} y={region.y * logicalHeight} width={region.w * 1000} height={region.h * logicalHeight} />
+    {(drawing.kind === 'rect' || drawing.kind === 'ellipse') && region ? <rect className="oe-hit oe-hit-area" style={hitStyle} x={region.x * 1000} y={region.y * logicalHeight} width={region.w * 1000} height={region.h * logicalHeight} />
       : drawing.kind === 'pen' ? points.length === 1 ? <circle className="oe-hit-point" cx={start.x * 1000} cy={start.y * logicalHeight} r={Math.max((drawing.strokeWidth ?? 3) / 2, 7 / displayScale)} /> : <polyline className="oe-hit" style={hitStyle} points={linePoints} />
         : <g><line className="oe-hit" style={hitStyle} x1={start.x * 1000} y1={start.y * logicalHeight} x2={end.x * 1000} y2={end.y * logicalHeight} />{arrowPoints ? <polygon className="oe-hit oe-hit-area" points={arrowPoints} /> : null}</g>}
   </g>;
@@ -79,7 +79,7 @@ const CommittedShapes = memo(function CommittedShapes({ drawings, hiddenId, logi
   return <g>{drawings.map((drawing) => drawing.id === hiddenId ? null : <Shape key={drawing.id} drawing={drawing} logicalHeight={logicalHeight} displayScale={displayScale} />)}</g>;
 });
 
-function SelectionHandles({ drawing, logicalHeight, viewport }: { drawing: Drawing; logicalHeight: number; viewport: Viewport }) {
+const SelectionHandles = memo(function SelectionHandles({ drawing, logicalHeight, viewport }: { drawing: Drawing; logicalHeight: number; viewport: Viewport }) {
   const pixel = 1000 / Math.max(1, viewport.width), size = 9 * pixel;
   if (drawing.kind === 'pen' && drawing.points.length === 1) {
     const point = drawing.points[0];
@@ -94,7 +94,7 @@ function SelectionHandles({ drawing, logicalHeight, viewport }: { drawing: Drawi
       <rect x={handle.x * 1000 - size / 2} y={handle.y * logicalHeight - size / 2} width={size} height={size} fill="#bcf7de" stroke="#12352a" strokeWidth="1" vectorEffect="non-scaling-stroke" />
     </g>)}
   </g>;
-}
+});
 
 export const OverlayEditor = memo(function OverlayEditor({ drawings, currentFrame, fallbackFrame, onFrameSelect, onChange, viewport, enabled, blocked = false, readOnly = false, blockedLabel = '이미지 배치 중', onPause, onToolSelect, onBackgroundClick, toolbarHost, toolsHost, resetKey, onHistoryChange, onInsertDrawings, onCreate }: OverlayEditorProps) {
   const ownerId = `oe-${useId().replace(/:/g, '')}`;
@@ -103,6 +103,7 @@ export const OverlayEditor = memo(function OverlayEditor({ drawings, currentFram
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [defaults, setDefaults] = useState<DrawingStyle>(DEFAULT_STYLE);
   const [preview, setPreview] = useState<Drawing | null>(null);
+  const [previewOffset, setPreviewOffset] = useState<Point | null>(null);
   const [historyRevision, setHistoryRevision] = useState(0);
   const [notice, setNotice] = useState('');
   const [historyFrameHint, setHistoryFrameHint] = useState<number|null>(null);
@@ -123,12 +124,19 @@ export const OverlayEditor = memo(function OverlayEditor({ drawings, currentFram
   const selected = visibleDrawings.find((drawing) => drawing.id === selectedId);
   const latestRef = useRef({ onChange, onPause, onToolSelect, onBackgroundClick, defaults, selectedId: selected?.id ?? null, tool, viewport, enabled, blocked, readOnly, onCreate, onHistoryChange, currentFrame, fallbackFrame: resolvedFallback });
   latestRef.current = { onChange, onPause, onToolSelect, onBackgroundClick, defaults, selectedId: selected?.id ?? null, tool, viewport, enabled, blocked, readOnly, onCreate, onHistoryChange, currentFrame, fallbackFrame: resolvedFallback };
-  const logicalHeight = viewport.width > 0 ? 1000 * viewport.height / viewport.width : 562.5;
+  // Keep a constant aspect ratio stable across subpixel panel sizes, so resizing
+  // does not serialize every long pen path for floating-point rounding noise.
+  const logicalHeight = viewport.width > 0 ? Math.round(1e6 * 1000 * viewport.height / viewport.width) / 1e6 : 562.5;
   const displayScale = Math.max(1, viewport.width) / 1000;
   const style = selected ? { color: selected.color, strokeWidth: selected.strokeWidth ?? 3, opacity: selected.opacity ?? 1, fill: selected.fill || 'none' } : defaults;
   const closedShape = selected ? selected.kind === 'rect' || selected.kind === 'ellipse' : tool === 'rect' || tool === 'ellipse';
   const hiddenId = gestureRef.current?.kind !== 'create' ? preview?.id || null : null;
   const visiblePreview = preview && drawingFrame(preview, resolvedFallback) === currentFrame ? preview : null;
+  // Translation preserves every point's relative geometry. Keep long SVG pen
+  // paths stable while dragging; update a single transform until commit.
+  const movingOriginal = visiblePreview && gestureRef.current?.kind === 'move' ? gestureRef.current.original : null;
+  const previewTransform = movingOriginal && previewOffset
+    ? `translate(${previewOffset.x * 1000} ${previewOffset.y * logicalHeight})` : undefined;
   const selection = visiblePreview && visiblePreview.id === selectedId ? visiblePreview : selected;
 
   const cancelGesture = useCallback(() => {
@@ -137,6 +145,7 @@ export const OverlayEditor = memo(function OverlayEditor({ drawings, currentFram
     if (gesture && svgRef.current?.hasPointerCapture(gesture.pointerId)) svgRef.current.releasePointerCapture(gesture.pointerId);
     if (rafRef.current !== null) { cancelAnimationFrame(rafRef.current); rafRef.current = null; }
     setPreview(null);
+    setPreviewOffset(null);
   }, []);
 
   useLayoutEffect(() => {
@@ -348,7 +357,8 @@ export const OverlayEditor = memo(function OverlayEditor({ drawings, currentFram
     rafRef.current = requestAnimationFrame(() => {
       rafRef.current = null;
       const gesture = gestureRef.current;
-      if (gesture) setPreview(gesture.draft.flush());
+      if (gesture?.kind === 'move') setPreviewOffset(gesture.draft.translation());
+      else if (gesture) setPreview(gesture.draft.flush());
     });
   }, []);
 
@@ -381,6 +391,7 @@ export const OverlayEditor = memo(function OverlayEditor({ drawings, currentFram
     setSelectedId(drawing.id);
     gestureRef.current = { kind, pointerId: event.pointerId, frame: currentFrame, original: drawing, bounds, draft: createOverlayGesture({ kind, original: drawing, start: point, width: bounds.width, height: bounds.height, ...(handle ? { handle } : {}) }) };
     setPreview(drawing);
+    setPreviewOffset(kind === 'move' ? { x: 0, y: 0 } : null);
   }
 
   function updateGesture(event: ReactPointerEvent<SVGSVGElement>) {
@@ -460,9 +471,9 @@ export const OverlayEditor = memo(function OverlayEditor({ drawings, currentFram
       onPointerDown={startGesture} onPointerMove={updateGesture} onPointerUp={finishGesture} onPointerCancel={cancelPointerGesture} onLostPointerCapture={cancelPointerGesture}>
       <defs><clipPath id={`${ownerId}-clip`} clipPathUnits="userSpaceOnUse"><rect width="1000" height={logicalHeight} /></clipPath></defs>
       <g clipPath={`url(#${ownerId}-clip)`}><CommittedShapes drawings={visibleDrawings} hiddenId={hiddenId} logicalHeight={logicalHeight} displayScale={displayScale} />
-        {visiblePreview ? <Shape drawing={visiblePreview} logicalHeight={logicalHeight} displayScale={displayScale} /> : null}
+        {visiblePreview ? <g transform={previewTransform}><Shape drawing={movingOriginal ?? visiblePreview} logicalHeight={logicalHeight} displayScale={displayScale} /></g> : null}
       </g>
-      {!readOnly && !blocked && selection && tool === 'select' ? <SelectionHandles drawing={selection} logicalHeight={logicalHeight} viewport={viewport} /> : null}
+      {!readOnly && !blocked && selection && tool === 'select' ? <g transform={previewTransform}><SelectionHandles drawing={selection} logicalHeight={logicalHeight} viewport={viewport} /></g> : null}
     </svg>
     {!readOnly && toolsHost ? createPortal(tools, toolsHost) : null}
     {toolbarHost ? createPortal(readOnly ? <div className="oe-readonly-context">{sceneNavigation}<div className="oe-editor-status"><span>저장된 위치 표시 · 각 그림의 작성 프레임에서 표시</span><span>그림을 바꾸려면 새 요청으로 복사하세요.</span></div></div> : toolbar, toolbarHost) : null}

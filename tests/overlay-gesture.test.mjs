@@ -189,3 +189,27 @@ test('only newly drawn pens are simplified and long sample batches stay bounded'
   assert.equal(straight.flush().points.length, 4);
   assert.equal(straight.finish().points.length, 2);
 });
+
+test('live move offsets match final vertices at every edge without allocating pen geometry per frame', () => {
+  for (const kind of ['rect', 'ellipse', 'line', 'arrow', 'pen']) {
+    const drawing = kind === 'pen' ? finePen() : { ...createDrawing(kind, { x: .2, y: .3 }, { x: .7, y: .8 }, style, kind), frame: 30 };
+    let pointReads = 0;
+    const original = { ...drawing, get points() { pointReads++; return drawing.points; } };
+    const gesture = gestureFor(original);
+    gesture.update({ x: .12, y: .51 });
+    gesture.translation();
+    const reads = pointReads;
+    for (const point of [{ x: .15, y: .55 }, { x: 0, y: 0 }, { x: 1, y: 1 }, start]) {
+      gesture.update(point);
+      const offset = gesture.translation();
+      assert.equal(pointReads, reads, 'after the initial bounds read, live movement does not read or copy vertices');
+      const expected = translateDrawing(drawing, point.x - start.x, point.y - start.y);
+      for (let i = 0; i < drawing.points.length; i++) {
+        assert.ok(Math.abs(drawing.points[i].x + offset.x - expected.points[i].x) < 1e-12);
+        assert.ok(Math.abs(drawing.points[i].y + offset.y - expected.points[i].y) < 1e-12);
+      }
+    }
+    gesture.update({ x: .18, y: .52 });
+    assert.deepEqual(gesture.finish(), translateDrawing(drawing, .18 - start.x, .52 - start.y));
+  }
+});
