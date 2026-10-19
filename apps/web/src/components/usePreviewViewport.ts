@@ -38,6 +38,7 @@ export function usePreviewViewport(surface: RefObject<HTMLDivElement | null>, ba
     window.addEventListener('keydown', escape, true);
     return () => { window.removeEventListener('blur', blur); window.removeEventListener('keydown', escape, true); cancelPan(); };
   }, [cancelPan]);
+  const leaveHand = useCallback(() => { cancelPan(); setHand(false); suppressClick.current = false; }, [cancelPan]);
   const reset = useCallback(() => { cancelPan(); setView(FIT); setHand(false); }, [cancelPan]);
   const zoom = useCallback((direction: number) => {
     cancelPan();
@@ -83,7 +84,7 @@ export function usePreviewViewport(surface: RefObject<HTMLDivElement | null>, ba
     setView(commit ? { ...current.initial, x: current.initial.x + event.clientX - current.startX, y: current.initial.y + event.clientY - current.startY } : current.initial);
     cancelPan();
   }
-  return { rect, hand, panning, reset, zoom, toggleHand: () => { cancelPan(); setHand(value => !value); }, events: {
+  return { rect, hand, panning, reset, zoom, leaveHand, toggleHand: () => { cancelPan(); setHand(value => !value); }, events: {
     onPointerDownCapture: begin, onPointerMoveCapture: move,
     onPointerUpCapture: (event: ReactPointerEvent<HTMLDivElement>) => finish(event, true),
     onPointerCancelCapture: (event: ReactPointerEvent<HTMLDivElement>) => finish(event, false),

@@ -43,6 +43,7 @@ interface OverlayEditorProps {
   readOnly?: boolean;
   blockedLabel?: string;
   onPause: () => void;
+  onToolSelect?: () => void;
   onBackgroundClick: () => void;
   toolbarHost: HTMLElement | null;
   toolsHost?: HTMLElement | null;
@@ -95,7 +96,7 @@ function SelectionHandles({ drawing, logicalHeight, viewport }: { drawing: Drawi
   </g>;
 }
 
-export const OverlayEditor = memo(function OverlayEditor({ drawings, currentFrame, fallbackFrame, onFrameSelect, onChange, viewport, enabled, blocked = false, readOnly = false, blockedLabel = '이미지 배치 중', onPause, onBackgroundClick, toolbarHost, toolsHost, resetKey, onHistoryChange, onInsertDrawings, onCreate }: OverlayEditorProps) {
+export const OverlayEditor = memo(function OverlayEditor({ drawings, currentFrame, fallbackFrame, onFrameSelect, onChange, viewport, enabled, blocked = false, readOnly = false, blockedLabel = '이미지 배치 중', onPause, onToolSelect, onBackgroundClick, toolbarHost, toolsHost, resetKey, onHistoryChange, onInsertDrawings, onCreate }: OverlayEditorProps) {
   const ownerId = `oe-${useId().replace(/:/g, '')}`;
   const svgRef = useRef<SVGSVGElement>(null);
   const [tool, setTool] = useState<Tool>('select');
@@ -120,8 +121,8 @@ export const OverlayEditor = memo(function OverlayEditor({ drawings, currentFram
   const frameGroups = useMemo(() => groupDrawings(drawings, resolvedFallback), [drawings, resolvedFallback]);
   const visibleDrawings = frameGroups.find(group => group.frame === currentFrame)?.drawings ?? EMPTY_DRAWINGS;
   const selected = visibleDrawings.find((drawing) => drawing.id === selectedId);
-  const latestRef = useRef({ onChange, onPause, onBackgroundClick, defaults, selectedId: selected?.id ?? null, tool, viewport, enabled, blocked, readOnly, onCreate, onHistoryChange, currentFrame, fallbackFrame: resolvedFallback });
-  latestRef.current = { onChange, onPause, onBackgroundClick, defaults, selectedId: selected?.id ?? null, tool, viewport, enabled, blocked, readOnly, onCreate, onHistoryChange, currentFrame, fallbackFrame: resolvedFallback };
+  const latestRef = useRef({ onChange, onPause, onToolSelect, onBackgroundClick, defaults, selectedId: selected?.id ?? null, tool, viewport, enabled, blocked, readOnly, onCreate, onHistoryChange, currentFrame, fallbackFrame: resolvedFallback });
+  latestRef.current = { onChange, onPause, onToolSelect, onBackgroundClick, defaults, selectedId: selected?.id ?? null, tool, viewport, enabled, blocked, readOnly, onCreate, onHistoryChange, currentFrame, fallbackFrame: resolvedFallback };
   const logicalHeight = viewport.width > 0 ? 1000 * viewport.height / viewport.width : 562.5;
   const displayScale = Math.max(1, viewport.width) / 1000;
   const style = selected ? { color: selected.color, strokeWidth: selected.strokeWidth ?? 3, opacity: selected.opacity ?? 1, fill: selected.fill || 'none' } : defaults;
@@ -270,6 +271,7 @@ export const OverlayEditor = memo(function OverlayEditor({ drawings, currentFram
   const chooseTool = useCallback((nextTool: Tool) => {
     if (latestRef.current.blocked || latestRef.current.readOnly) return;
     latestRef.current.onPause();
+    latestRef.current.onToolSelect?.();
     endEditGroup();
     cancelGesture();
     activeRef.current = true;
