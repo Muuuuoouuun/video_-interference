@@ -20,10 +20,10 @@ interface Gesture {
   initial: number;
   availableHeight: number;
 }
-interface Props { viewer: ReactNode; children: ReactNode; compact: boolean }
+interface Props { viewer: ReactNode; children: ReactNode; compact: boolean; simple?: boolean }
 
 /** Local sizing state keeps video, drawings and dock inputs mounted throughout a gesture. */
-export function VerticalWorkspaceLayout({ viewer, children, compact }: Props) {
+export function VerticalWorkspaceLayout({ viewer, children, compact, simple = false }: Props) {
   const [preferred, setPreferred] = useState(readHeight);
   const preferredRef = useRef(preferred);
   const [availableHeight, setAvailableHeight] = useState<number | null>(null);
@@ -33,9 +33,9 @@ export function VerticalWorkspaceLayout({ viewer, children, compact }: Props) {
   const rafRef = useRef<number | null>(null);
   const keyboardPending = useRef(false);
   const dockId = useId();
-  const height = resolveTimelineHeight(preferred, availableHeight ?? NaN, compact);
+  const height = simple && !compact ? Math.min(160, availableHeight ?? 160) : resolveTimelineHeight(preferred, availableHeight ?? NaN, compact);
   const limits = timelineHeightLimits(availableHeight ?? NaN);
-  const adjustable = !compact && limits.max > limits.min;
+  const adjustable = !compact && !simple && limits.max > limits.min;
 
   const updateHeight = useCallback((next: number) => {
     preferredRef.current = next;
@@ -102,10 +102,10 @@ export function VerticalWorkspaceLayout({ viewer, children, compact }: Props) {
       flushKeyboard();
     };
   }, [finishGesture, flushKeyboard]);
-  useLayoutEffect(() => { finishGesture(false); flushKeyboard(); }, [compact, finishGesture, flushKeyboard]);
+  useLayoutEffect(() => { finishGesture(false); flushKeyboard(); }, [compact, simple, finishGesture, flushKeyboard]);
 
   function begin(event: PointerEvent<HTMLDivElement>) {
-    if (event.button !== 0 || gestureRef.current || !adjustable || !window.matchMedia('(min-width: 901px)').matches) return;
+    if (event.button !== 0 || gestureRef.current || !adjustable) return;
     const measured = rootRef.current?.clientHeight;
     if (!measured || timelineHeightLimits(measured).max <= timelineHeightLimits(measured).min) return;
     event.preventDefault(); event.stopPropagation(); flushKeyboard();
@@ -140,7 +140,7 @@ export function VerticalWorkspaceLayout({ viewer, children, compact }: Props) {
     if (event.target !== event.currentTarget || event.nativeEvent.isComposing || event.metaKey || event.ctrlKey || event.altKey) return;
     if (!['ArrowUp', 'ArrowDown', 'Home', 'End', 'Enter'].includes(event.key)) return;
     event.preventDefault(); event.stopPropagation();
-    if (!adjustable || gestureRef.current || !window.matchMedia('(min-width: 901px)').matches) return;
+    if (!adjustable || gestureRef.current) return;
     if (event.key === 'Enter') { if (!event.repeat) reset(); return; }
     const delta = event.key === 'Home' ? 100000 : event.key === 'End' ? -100000
       : (event.key === 'ArrowUp' ? -1 : 1) * (event.shiftKey ? 40 : 10);
@@ -151,7 +151,7 @@ export function VerticalWorkspaceLayout({ viewer, children, compact }: Props) {
   return <div className="vi-vertical-workspace" ref={rootRef} data-compact={compact}
     style={{ '--vi-timeline-height': `${height}px` } as CSSProperties}>
     <div className="vi-viewer-region">{viewer}</div>
-    {!compact ? <div className="vi-vertical-resize-handle" role="separator" tabIndex={adjustable ? 0 : -1} aria-disabled={!adjustable} aria-label="영상과 타임라인 높이 조절" aria-orientation="horizontal"
+    {!compact && !simple ? <div className="vi-vertical-resize-handle" role="separator" tabIndex={adjustable ? 0 : -1} aria-disabled={!adjustable} aria-label="영상과 타임라인 높이 조절" aria-orientation="horizontal"
       aria-controls={dockId} aria-valuemin={limits.min} aria-valuemax={limits.max} aria-valuenow={height} aria-valuetext={`타임라인 ${Math.round(height)}픽셀`}
       title="위아래로 드래그 · ↑ ↓ 10px · Shift 40px · Home 최소 / End 최대 · 더블클릭/Enter 기본 높이 · Esc 드래그 취소"
       data-active={dragging} onPointerDown={begin} onPointerMove={move} onPointerUp={event => end(event, true)} onPointerCancel={event => end(event, false)} onLostPointerCapture={event => end(event, false)}

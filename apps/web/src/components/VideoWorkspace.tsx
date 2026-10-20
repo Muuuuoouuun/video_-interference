@@ -25,10 +25,15 @@ import './DirectingLayout.css';
 
 const FPS = 30;
 const EMPTY_ATTACHMENTS: Attachment[] = [];
+const SIMPLE_TIMELINE_KEY = 'interference.timeline-simple.v1';
 const COMPACT_TIMELINE_KEY = 'interference.timeline-compact.v1';
 const PLAYBACK_RATES = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4];
 function readCompactTimeline() {
   try { return typeof window !== 'undefined' && window.localStorage.getItem(COMPACT_TIMELINE_KEY) === 'true'; }
+  catch { return false; }
+}
+function readSimpleTimeline() {
+  try { return typeof window !== 'undefined' && window.localStorage.getItem(SIMPLE_TIMELINE_KEY) === 'true'; }
   catch { return false; }
 }
 type Range = { in: number; out: number };
@@ -80,6 +85,7 @@ function clamp(value: number, min: number, max: number) {
 
 export function VideoWorkspace({ version, versions, asset, comments, attachments = EMPTY_ATTACHMENTS, selectedCommentId, selectedRangeIndex = 0, currentFrame, focusFrameToken, playbackRef, onFrameChange, range, rangeAvailable = true, rangeActive = true, onRangeClear, onRangeStart, canCompose = true, composeLabel = '선택 구간에 피드백', onRangeChange, drawings, onDrawingsChange, onCompose, compareVersion, onInsertDrawings, onDrawingCreate, imageOverlay, annotationsReadOnly = false, editingLocked = false, editingLockLabel, annotationFrame, drawingHistoryKey, onDrawingHistoryChange, onSelectComment }: VideoWorkspaceProps) {
   const [compactTimeline, setCompactTimeline] = useState(readCompactTimeline);
+  const [simpleTimeline, setSimpleTimeline] = useState(readSimpleTimeline);
   const [compactToolsOpen, setCompactToolsOpen] = useState(false);
   const timelineContentId = useId();
   const drawingToolsId = useId();
@@ -497,12 +503,21 @@ export function VideoWorkspace({ version, versions, asset, comments, attachments
     try { window.localStorage.setItem(COMPACT_TIMELINE_KEY, String(next)); } catch { /* Layout still works without storage. */ }
   }
 
+  function changeTimelineMode(mode: string) {
+    cancelTimelineDrag(); setCompactToolsOpen(false);
+    setCompactTimeline(mode === 'compact'); setSimpleTimeline(mode === 'simple');
+    try {
+      window.localStorage.setItem(COMPACT_TIMELINE_KEY, String(mode === 'compact'));
+      window.localStorage.setItem(SIMPLE_TIMELINE_KEY, String(mode === 'simple'));
+    } catch { /* Display mode remains available without storage. */ }
+  }
+
   const overlayStyle: CSSProperties = { left: preview.rect.left, top: preview.rect.top, width: preview.rect.width, height: preview.rect.height };
 
   return (
-    <section ref={workspaceRef} className="vi-workspace" data-timeline-compact={compactTimeline} aria-label="영상과 시간별 피드백 작업 공간"
+    <section ref={workspaceRef} className="vi-workspace" data-timeline-compact={compactTimeline} data-timeline-simple={simpleTimeline && !compactTimeline} aria-label="영상과 시간별 피드백 작업 공간"
 >
-      <VerticalWorkspaceLayout compact={compactTimeline} viewer={<div className={`vi-viewer${compareVersion ? ' vi-viewer-comparing' : ''}`}>
+      <VerticalWorkspaceLayout compact={compactTimeline} simple={simpleTimeline} viewer={<div className={`vi-viewer${compareVersion ? ' vi-viewer-comparing' : ''}`}>
         <div className={`vi-video-surface${preview.hand && preview.rect.zoom > 1 ? ' vi-hand-mode' : ''}${preview.panning ? ' vi-panning' : ''}`} ref={surfaceRef} {...preview.events}>
           <video ref={videoRef} style={overlayStyle} muted={muted} src={version.mediaUrl} poster={version.thumbnailUrl || asset.thumbnailUrl} preload="metadata" playsInline
             onLoadedMetadata={() => { const video = videoRef.current; if (video) { video.currentTime = currentFrameRef.current / FPS; video.playbackRate = playbackRate; } measureVideo(); }}
@@ -549,6 +564,9 @@ export function VideoWorkspace({ version, versions, asset, comments, attachments
       </div>
       <div className="vi-drawing-tools" ref={setOverlayToolsHost} hidden={compactTimeline || annotationsReadOnly}/>
       <div className="vi-directing-actions">
+        <select className="vi-rail-mode" aria-label="타임 레일 표시" title="타임 레일 표시 방식" value={compactTimeline ? 'compact' : simpleTimeline ? 'simple' : 'detail'} onChange={event => changeTimelineMode(event.target.value)}>
+          <option value="detail">상세</option><option value="simple">간단</option><option value="compact">한 줄</option>
+        </select>
         {compactTimeline ? <>
           <button className="vi-dock-icon vi-pan-tool" disabled={preview.rect.zoom <= 1} aria-pressed={preview.hand && preview.rect.zoom > 1} onClick={preview.toggleHand} aria-label="확대한 영상 이동" title="이동 도구 (H)"><Hand size={16}/></button>
           {(hasActiveRange || annotationsReadOnly) && onRangeClear ? <button type="button" className="vi-dock-icon" disabled={editingLocked} aria-label={annotationsReadOnly ? '댓글 선택 해제' : '구간 해제'} title={annotationsReadOnly ? '댓글 선택 해제' : '구간 해제'} onClick={clearRange}><X size={15}/></button> : null}
@@ -568,7 +586,7 @@ export function VideoWorkspace({ version, versions, asset, comments, attachments
         <TimelineSeekSurface key={version.id} compact={compactTimeline} durationFrames={durationFrames} frame={frame} disabled={editingLocked} onSeek={seekTimeline}>
         <TimelineMarkers key={version.id} markers={markers} durationFrames={durationFrames} selectedId={selectedCommentId} disabled={editingLocked} onSelect={selectMarker}/>
         <div className="vi-timeline" ref={timelineRef} data-feedback-category={selectedCategory}>
-          <TimelineFilmstrip version={version} enabled={!compactTimeline} />
+          <TimelineFilmstrip version={version} enabled={!compactTimeline && !simpleTimeline} />
           <TimelineSavedRanges markers={markers} durationFrames={durationFrames} activeKey={hasActiveRange && annotationsReadOnly && selectedCommentId ? `${selectedCommentId}-${selectedRangeIndex}` : null}/>
           {hasActiveRange ? <div className="vi-range-selection" data-readonly={annotationsReadOnly} style={{ left: `${safeIn / durationFrames * 100}%`, width: `${(safeOut - safeIn) / durationFrames * 100}%` }} /> : null}
           <div className="vi-playhead" style={{ left: `${frame / durationFrames * 100}%` }}><span /></div>
@@ -580,11 +598,11 @@ export function VideoWorkspace({ version, versions, asset, comments, attachments
         </TimelineSeekSurface>
         <div id={timelineContentId} hidden={compactTimeline}>
         <TimelineSelection key={`${version.id}:${selectedCommentId ?? 'draft'}`} frame={frame} frameIn={safeIn} frameOut={safeOut} durationFrames={durationFrames} active={hasActiveRange} available={rangeAvailable} readOnly={annotationsReadOnly} locked={editingLocked} mediaError={mediaError} onChange={onRangeChange} onMark={markRange} onStart={startRange} onClear={onRangeClear ? clearRange : undefined}/>
-        {!compactTimeline ? <TimelineDetails comments={comments} versions={versions} version={version} attachments={attachments} selectedId={selectedCommentId} selectedRangeIndex={selectedRangeIndex} disabled={editingLocked} onSelect={selectDetail}/> : null}
+        {!compactTimeline && !simpleTimeline ? <TimelineDetails comments={comments} versions={versions} version={version} attachments={attachments} selectedId={selectedCommentId} selectedRangeIndex={selectedRangeIndex} disabled={editingLocked} onSelect={selectDetail}/> : null}
         </div>
       </div>
 
-      <div className="vi-workspace-bottom" hidden={compactTimeline}>
+      <div className="vi-workspace-bottom" hidden={compactTimeline || simpleTimeline}>
         <span className="vi-drawing-contract">그림은 시간별 피드백에 함께 저장됩니다.</span>
         <button className="vi-compose-button" disabled={editingLocked || !canCompose} onClick={() => void composeFromViewer()} title="현재 시점이나 선택 구간에 피드백 작성 (C)"><Plus size={16} />{composeLabel}</button>
       </div>

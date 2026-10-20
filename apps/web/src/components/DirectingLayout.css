@@ -87,3 +87,81 @@
 .vi-workspace[data-timeline-compact="true"] .vi-marker-picker { pointer-events: auto; }
 .vi-workspace[data-timeline-compact="true"] .vi-timeline-hover-line { top: 2px; bottom: 2px; }
 .vi-workspace[data-timeline-compact="true"] .vi-timeline-hover-time { top: -25px; }
+
+/* The display mode stays reachable while the tool strip scrolls horizontally. */
+.vi-review-toolbar .vi-directing-actions { position: sticky; right: 0; z-index: 2; background: var(--canvas); padding-left: 6px; }
+.vi-rail-mode { height: 28px; max-width: 70px; padding: 0 5px; border: 1px solid var(--border); border-radius: 6px; color: var(--text-secondary); background: var(--surface); font-size: 11px; cursor: pointer; }
+.vi-workspace[data-timeline-simple="true"] .vi-filmstrip { display: none; }
+.vi-workspace[data-timeline-simple="true"] .vi-review-toolbar { padding-top: 2px; padding-bottom: 2px; }
+.vi-workspace[data-timeline-simple="true"] .vi-timeline { height: 18px; margin-top: 4px; background: var(--surface-muted); }
+.vi-workspace[data-timeline-simple="true"] .vi-marker-rail { height: 30px; }
+.vi-workspace[data-timeline-simple="true"] .vi-timeline-ruler { height: 16px; padding-bottom: 3px; }
+.vi-workspace[data-timeline-simple="true"] .vi-overlay-controls .oe-frame-context,
+.vi-workspace[data-timeline-simple="true"] .vi-overlay-controls .oe-editor-status { display: none; }
+.vi-workspace[data-timeline-simple="true"] .vi-overlay-controls .oe-toolbar { padding: 0; border: 0; }
+.vi-workspace[data-timeline-simple="true"] .vi-selection { padding-top: 4px; padding-bottom: 2px; }
+.vi-workspace[data-timeline-simple="true"] .vi-timeline-area { padding-top: 0; }
+.vi-workspace[data-timeline-simple="true"] .vi-range-handle { height: 24px; }
+.vi-workspace[data-timeline-simple="true"] .vi-playhead { height: 43px; }
+.vi-workspace[data-timeline-simple="true"] .vi-loop-hint { display: none; }
+
+/* Keep video sizing identical at every window width, including portrait windows. */
+.editor-layout > .workspace-shell { min-height: 0; overflow: hidden; }
+.workspace-shell > .workspace-heading { flex-shrink: 0; }
+.workspace-shell > .vi-workspace { flex: 1; min-height: 0; }
+.vi-viewer-region > .vi-viewer { width: 100%; height: 100%; min-height: 0; max-height: none; aspect-ratio: auto; }
+@media (max-width: 900px) {
+  #root > .app-shell { height: 100dvh; min-height: 0; overflow: hidden; }
+  .app-shell .editor-layout.workspace-resizable {
+    display: grid; overflow: hidden;
+    grid-template-columns: var(--project-width) minmax(0, 1fr);
+    grid-template-rows: minmax(260px, 1.6fr) minmax(210px, 1fr);
+  }
+  .app-shell .editor-layout.workspace-resizable.project-collapsed { --project-width: 48px; }
+  .app-shell .editor-layout.workspace-resizable.feedback-collapsed { grid-template-rows: minmax(0, 1fr) 44px; }
+  .editor-layout > .version-rail { grid-column: 1; grid-row: 1 / 3; display: flex; flex-direction: column; align-items: stretch; padding: 10px 7px; overflow: auto; border-right: 1px solid var(--border); border-bottom: 0; }
+  .version-rail .version-list { flex-direction: column; min-height: 0; overflow: auto; }
+  .version-rail .version-card { min-width: 0; }
+  .version-rail .rail-collapse-heading { flex-shrink: 0; }
+  .project-collapsed .version-rail { align-items: center; padding: 10px 4px; }
+  .editor-layout > .workspace-shell { grid-column: 2; grid-row: 1; padding: 10px 12px 0; }
+  .workspace-shell > .workspace-heading { margin-bottom: 7px; }
+  .workspace-shell > .workspace-heading > div:first-child { flex-direction: row; align-items: center; flex-wrap: wrap; }
+  .editor-layout > .request-rail { grid-column: 2; grid-row: 2; display: flex; flex-direction: column; min-height: 0; padding: 12px; gap: 0; overflow: auto; border-left: 0; border-top: 1px solid var(--border); }
+  .request-rail .request-rail-content { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; gap: 12px; flex: 1; }
+  .request-rail .request-rail-content[hidden] { display: none; }
+  .request-rail .request-panel { min-width: 0; min-height: 0; }
+  .request-rail .request-list { min-height: 0; max-height: 160px; }
+  .request-rail .composer-wrap { min-width: 0; margin: 0; padding: 0; }
+  .request-rail .composer .composer-feedback-field > textarea { min-height: 76px; }
+  .request-rail .interpreter-note { display: none; }
+  .request-rail .saved-request-context, .request-rail .saved-context-details { grid-column: 1 / -1; }
+  .feedback-collapsed .request-rail { padding: 4px 12px; }
+  .feedback-collapsed .request-rail-tools { margin: 0; }
+  .app-shell .status-bar { flex-shrink: 0; height: 32px; min-height: 32px; padding: 0 12px; }
+  .vi-review-toolbar { gap: 5px; }
+  .vi-directing-dock[data-compact="true"] { column-gap: 5px; grid-template-columns: max-content minmax(32px, 1fr) max-content; }
+  .vi-directing-dock[data-compact="true"] .vi-pan-tool { display: none; }
+  .vi-drawing-tools .oe-tool { padding: 0 5px; }
+}
+@media (max-width: 600px) {
+  .app-shell .app-header { height: 52px; min-height: 52px; padding: 0 10px; gap: 8px; flex-wrap: nowrap; }
+  .app-header .brand-block { display: none; }
+  .app-header .header-actions { width: auto; flex: 1; margin: 0; gap: 5px; }
+  .app-shell .editor-layout.workspace-resizable { --project-width: 140px; grid-template-rows: minmax(240px, 1.5fr) minmax(190px, 1fr); }
+  .app-shell .editor-layout.workspace-resizable.project-collapsed { --project-width: 42px; }
+  .editor-layout > .workspace-shell { padding: 8px 8px 0; }
+  .editor-layout > .request-rail { padding: 8px; }
+  .request-rail .request-rail-content { display: flex; flex-direction: column; gap: 8px; }
+  .request-rail .request-panel, .request-rail .composer-wrap { width: 100%; flex: 0 0 auto; }
+  .request-rail .request-list { max-height: 100px; }
+  .request-rail .empty-requests { padding: 8px; }
+  .request-rail .empty-requests > svg { display: none; }
+  .request-rail .panel-heading { margin-bottom: 8px; }
+  .vi-directing-dock[data-compact="true"] .vi-directing-actions { gap: 0; padding-left: 0; }
+  .vi-directing-dock[data-compact="true"] .vi-timeline-toggle { display: none; }
+  .vi-directing-dock[data-compact="true"] .vi-timecode { margin-left: 0; }
+  .vi-view-tools { top: 5px; right: 5px; gap: 0; padding: 2px; }
+  .vi-view-tools .vi-view-button { width: 26px; }
+  .vi-view-tools .vi-view-fit { width: 40px; }
+}
