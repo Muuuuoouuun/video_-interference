@@ -8,6 +8,7 @@ import { drawingFrame, groupDrawings, projectDrawings } from '../../../packages/
 import { api, upload } from './api';
 import { time } from './format';
 import { FeedbackExportDialog } from './components/FeedbackExportDialog';
+import { PremiereExportDialog, type PremiereExportResult } from './components/PremiereExportDialog';
 import { LayerPanel } from './components/LayerPanel';
 import { RequestPanel } from './components/RequestPanel';
 import type { PreparedContextBundle } from './components/RequestPanel';
@@ -30,6 +31,10 @@ export function App() {
   const [feedbackPanelOpen, setFeedbackPanelOpen] = useState(true);
   const [feedbackAnchorMode, setFeedbackAnchorMode] = useState<'point'|'range'>('point');
   const [exportOpen, setExportOpen] = useState(false);
+  const [premiereOpen, setPremiereOpen] = useState(false);
+  const [premiereResult, setPremiereResult] = useState<PremiereExportResult | null>(null);
+  const [premiereError, setPremiereError] = useState('');
+  const premiereInFlight = useRef(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [trashOpen, setTrashOpen] = useState(false);
   const [undoDeleteId, setUndoDeleteId] = useState<string | null>(null);
@@ -138,6 +143,14 @@ export function App() {
     catch (error) { setError((error as Error).message); return null; }
     finally { setBusy(false); }
   }, []);
+  async function exportPremiere() {
+    if (!version || !data || busy || loadingFile || composerActive || rendering || premiereInFlight.current) return;
+    if (draftPending || supplementDraft || layerDraftOpen) { setError('작성 중인 피드백을 먼저 저장한 뒤 내보내 주세요.'); return; }
+    premiereInFlight.current = true; setPremiereOpen(true); setPremiereResult(null); setPremiereError(''); setBusy(true);
+    try { setPremiereResult(await api<PremiereExportResult>('/api/premiere-exports', 'POST', { versionId: version.id })); }
+    catch (error) { setPremiereError(error instanceof Error ? error.message : 'Premiere 연동 자료를 준비하지 못했습니다.'); }
+    finally { premiereInFlight.current = false; setBusy(false); }
+  }
   async function exportFeedback() {
     if (!version || !data || !data.comments.length || busy || loadingFile || composerActive || rendering || exportInFlight.current) return;
     if (draftPending || supplementDraft || layerDraftOpen) { setError('작성 중인 피드백을 먼저 저장한 뒤 내보내 주세요.'); return; }
@@ -359,7 +372,7 @@ export function App() {
       <div className="breadcrumb"><span>시간별 피드백</span><span>/</span><span title={data.project.name}>{data.project.name}</span></div>
       <div className="header-actions">
         <input type="file" accept="video/*" hidden ref={fileRef} onChange={e => { const file = e.target.files?.[0]; if (file) void importFile(file); e.target.value = ''; }}/>
-        <details className="workspace-more"><summary aria-label="추가 작업 옵션"><MoreHorizontal size={18}/><span>더 보기</span></summary><div><button className="quiet" aria-pressed={editingMode} disabled={busy || loadingFile || composerActive || layerDraftOpen || rendering} onClick={() => { setEditingMode(value => !value); setPreviewOpId(null); setCompare(false); }} title="명령 해석·승인·영상 렌더 기능 표시">{editingMode ? '편집 기능 닫기' : '편집 기능'}</button></div></details>
+        <details className="workspace-more"><summary aria-label="추가 작업 옵션"><MoreHorizontal size={18}/><span>더 보기</span></summary><div><button className="quiet" aria-pressed={editingMode} disabled={busy || loadingFile || composerActive || layerDraftOpen || rendering} onClick={() => { setEditingMode(value => !value); setPreviewOpId(null); setCompare(false); }} title="명령 해석·승인·영상 렌더 기능 표시">{editingMode ? '편집 기능 닫기' : '편집 기능'}</button><button className="quiet" disabled={busy || loadingFile || composerActive || rendering || draftPending || supplementDraft || layerDraftOpen} onClick={event => { event.currentTarget.closest('details')?.removeAttribute('open'); void exportPremiere(); }} title="영상 없이 댓글·시간·투명 마크업을 Premiere로 전달">Premiere 연동</button></div></details>
         <button className="secondary" onClick={() => fileRef.current?.click()} disabled={loadingFile || rendering || busy || composerActive || draftPending || supplementDraft || layerDraftOpen}>{loadingFile ? <LoaderCircle size={16} className="spinning"/> : <FolderOpen size={16}/>}영상 열기</button>
         {editingMode ? <button className="secondary render-button" disabled={!approved.length || rendering || busy || loadingFile || composerActive || layerDraftOpen || supplementDraft || draftPending} onClick={() => void render()}>{rendering ? <LoaderCircle size={16} className="spinning"/> : <Play size={15} fill="currentColor"/>}{rendering ? job?.cancelRequested ? '취소 중' : `렌더 중 ${Math.round(job?.progress ?? 0)}%` : '승인한 요청 실행'}{approved.length && !rendering ? <span className="button-count">{approved.length}</span> : null}</button> : null}
         {rendering ? <button className="secondary" disabled={busy || job?.cancelRequested} onClick={() => void cancelRender()}><Square size={13}/>{job?.cancelRequested ? '취소 중' : '렌더 취소'}</button> : null}
@@ -382,6 +395,7 @@ export function App() {
     <ShortcutDialog open={shortcutsOpen} onClose={() => setShortcutsOpen(false)}/>
     <FeedbackTrashDialog open={trashOpen} comments={data.deletedComments ?? []} busy={busy || loadingFile || !!rendering} onClose={() => setTrashOpen(false)} onRestore={onRestoreComment}/>
     <FeedbackExportDialog open={exportOpen} busy={busy && exportInFlight.current} result={exportResult} error={exportError} onClose={() => { if (!exportInFlight.current) setExportOpen(false); }} onRetry={() => void exportFeedback()}/>
+    <PremiereExportDialog open={premiereOpen} busy={busy && premiereInFlight.current} result={premiereResult} error={premiereError} onClose={() => { if (!premiereInFlight.current) setPremiereOpen(false); }} onRetry={() => void exportPremiere()}/>
     {error ? <div className="feedback error" role="alert"><span>{error}</span><button className="quiet" onClick={() => void load().then(() => setError('')).catch(e => setError((e as Error).message))}>다시 연결</button><button onClick={() => setError('')} aria-label="오류 메시지 닫기"><X size={16}/></button></div> : null}
     {notice ? <div className="feedback notice" role="status"><span>{notice}</span>{undoDeleteId && notice === '피드백을 휴지통으로 옮겼습니다.' ? <button className="feedback-undo" disabled={busy} onClick={() => void onRestoreComment(undoDeleteId)}><RotateCcw size={14}/>되돌리기</button> : null}<button onClick={() => setNotice('')} aria-label="알림 닫기"><X size={16}/></button></div> : null}
     {showAssets ? <div className="drawer-scrim" onClick={() => setShowAssets(false)}><section className="asset-drawer" role="dialog" aria-modal="true" aria-label="에셋 보관함" onClick={e => e.stopPropagation()}><div className="panel-heading"><h2>에셋 보관함</h2><button className="quiet" onClick={() => setShowAssets(false)} aria-label="에셋 보관함 닫기"><X size={18}/></button></div><p className="subtle">참고 자료와 영상에 넣을 에셋을 구분합니다.</p>{data.attachments.length === 0 ? <p>요청 작성 영역에서 이미지를 첨부하거나 음성을 녹음하세요.</p> : data.attachments.map(a => <a className="asset-row" href={a.mediaUrl} target="_blank" rel="noreferrer" key={a.id}>{a.mimeType.startsWith('image/') ? <img src={a.mediaUrl} alt=""/> : <FileIcon/>}<div><strong>{a.name}</strong><small>{a.role === 'reference' ? '스타일 참고' : a.role === 'insert' ? '영상에 삽입' : '편집 지시 음성'}</small></div></a>)}</section></div> : null}

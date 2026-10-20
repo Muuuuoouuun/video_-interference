@@ -17,6 +17,7 @@ import { prepareRequestContextBundle } from './context-bundle.mjs';
 import { isVisualOp, visualLayerId } from '../../packages/core/layer-snapshot.mjs';
 import { prepareFilmstrip, readFilmstripCache } from './filmstrip.mjs';
 import { prepareFeedbackExport, selectFeedbackComments } from './feedback-export.mjs';
+import { preparePremiereExport } from './premiere-export.mjs';
 import { FEEDBACK_CATEGORIES } from '../../packages/core/feedback-category.mjs';
 import { IMAGE_ATTACHMENT_LIMIT } from '../../packages/core/comment-attachments.mjs';
 
@@ -40,6 +41,7 @@ const renderTasks = new Map();
 const initializationTasks = new Set();
 const filmstripTasks = new Map();
 const feedbackExportTasks = new Map();
+let premiereExportInFlight = false;
 let filmstripTail = Promise.resolve();
 
 await mkdir(join(storageRoot, 'media'), { recursive: true });
@@ -346,6 +348,32 @@ async function prepareCommentContext(comment, workspace) {
   finally { interpreting.delete(comment.id); interpretationControllers.delete(comment.id); }
 }
 
+async function exportPremiere(input, workspace) {
+  assertWorkspace(workspace);
+  if (!input || typeof input !== 'object' || Array.isArray(input) ||
+      Object.keys(input).some(key => key !== 'versionId') || typeof input.versionId !== 'string') throw fail('연동 내보내기 형식이 유효하지 않습니다.');
+  if (premiereExportInFlight) throw fail('Premiere 연동 자료를 준비 중입니다.', 409);
+  premiereExportInFlight = true;
+  let result, registeredIds = [];
+  try {
+    result = await preparePremiereExport(workspace, input.versionId, join(storageRoot, 'premiere-exports'));
+    assertWorkspace(workspace);
+    const id = uid('premiere');
+    data.files[`${id}_json`] = { path: result.manifestPath, mimeType: 'application/json; charset=utf-8', name: 'premiere-feedback.json' };
+    data.files[`${id}_zip`] = { path: result.archivePath, mimeType: 'application/zip', name: 'premiere-feedback.zip' };
+    data.files[`${id}_plugin`] = { path: result.pluginArchivePath, mimeType: 'application/zip', name: 'premiere-panel.zip' };
+    registeredIds = [`${id}_json`, `${id}_zip`, `${id}_plugin`];
+    save();
+    return { manifestUrl: `/media/${id}_json`, archiveUrl: `/media/${id}_zip`, pluginUrl: `/media/${id}_plugin`,
+      commentCount: result.commentCount, overlayCount: result.overlayCount, unplacedCount: result.unplacedCount,
+      timelineSegmentCount: result.timelineSegmentCount, skippedOverlayCount: result.skippedOverlayCount };
+  } catch (error) {
+    for (const id of registeredIds) delete data.files[id];
+    if (result) await rm(result.directory, { recursive: true, force: true });
+    throw error;
+  } finally { premiereExportInFlight = false; }
+}
+
 async function exportFeedback(input, workspace) {
   assertWorkspace(workspace);
   if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).some(key => !['versionId', 'commentIds'].includes(key))) throw fail('피드백 내보내기 형식이 유효하지 않습니다.');
@@ -513,6 +541,7 @@ async function handleRequest(req, res) {
       workspace.project.activeVersionId = input.activeVersionId; save(); return json(res, 200, workspace.project);
     }
     if (req.method === 'POST' && path === '/api/feedback-exports') { const { input, workspace } = await projectBody(req); return json(res, 200, await exportFeedback(input, workspace)); }
+    if (req.method === 'POST' && path === '/api/premiere-exports') { const { input, workspace } = await projectBody(req); return json(res, 200, await exportPremiere(input, workspace)); }
     const filmstripMatch = path.match(/^\/api\/versions\/([\w-]+)\/filmstrip$/);
     if (req.method === 'GET' && filmstripMatch) return json(res, 200, await versionFilmstrip(filmstripMatch[1]));
     const layersMatch = path.match(/^\/api\/versions\/([\w-]+)\/layers$/);

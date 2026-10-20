@@ -57,6 +57,21 @@ await test('loopback API preserves approvals, versions, media boundaries and imp
   try { assert.equal(JSON.parse(koreanDb.prepare('SELECT data FROM workspace WHERE id = 1').get().data).state.comments.find(item => item.id === note.id).text, koreanPatch.text, 'split Korean bytes persist intact in SQLite'); }
   finally { koreanDb.close(); }
   assert.equal((await request('/api/comments', 'POST', { versionId: state.versions[0].id, frameIn: 0, frameOut: 30, kind: 'unknown', text: 'invalid kind' })).response.status, 400);
+  // Premiere exports transfer only feedback + PNGs, including a self-contained panel ZIP.
+  const premiere = await request('/api/premiere-exports', 'POST', { versionId: state.versions[0].id });
+  assert.equal(premiere.response.status, 200);
+  assert.equal(premiere.value.commentCount, (await request('/api/state')).value.comments.length);
+  assert.ok(Number.isInteger(premiere.value.timelineSegmentCount));
+  assert.ok(Number.isInteger(premiere.value.skippedOverlayCount));
+  const handoff = await (await fetch(`${base}${premiere.value.manifestUrl}`)).json();
+  assert.equal(handoff.videoIncluded, false); assert.equal(handoff.stillsIncluded, false);
+  assert.equal(handoff.timelineOverlays.segments.length, premiere.value.timelineSegmentCount);
+  for (const key of ['archiveUrl', 'pluginUrl']) {
+    const response = await fetch(`${base}${premiere.value[key]}?download=1`);
+    assert.equal(response.status, 200); assert.equal(response.headers.get('content-type'), 'application/zip');
+    assert.equal(Buffer.from(await response.arrayBuffer()).subarray(0, 2).toString(), 'PK');
+  }
+  assert.equal((await request('/api/premiere-exports', 'POST', { versionId: state.versions[0].id, video: true })).response.status, 400);
   const original = state.versions[0], speed = state.ops.find(op => op.type === 'speed');
   const unapproved = await request('/api/render', 'POST', { parentVersionId: original.id, opIds: [speed.id] }); assert.equal(unapproved.response.status, 400);
   await request(`/api/ops/${speed.id}`, 'PATCH', { status: 'approved' });

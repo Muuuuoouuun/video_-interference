@@ -13,3 +13,5 @@
 .feedback-export-links button { font-size: 11px; }
 .feedback-export-copy-status { font-size: 11px; color: #b8ccb9; margin-top: 16px; line-height: 1.7; }
 .feedback-export-text { width: 100%; height: min(340px, 40vh); margin-top: 16px; resize: vertical; color: #dae8df; background: #0d1711; border: 1px solid #3b5847; border-radius: 5px; padding: 12px; font-size: 11px; line-height: 1.7; }
+.premiere-setup { margin-top: 20px; padding-top: 14px; border-top: 1px solid #8883; font-size: 12px; }
+.premiere-setup summary { cursor: pointer; }
