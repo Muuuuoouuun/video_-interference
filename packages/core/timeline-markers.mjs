@@ -8,8 +8,8 @@ export function layoutTimelineMarkers(markers, durationFrames, width) {
   const position = frame => Math.max(0, Math.min(width, frame / durationFrames * width));
   const measure = (start, end, digits) => {
     const count = end - start + 1;
-    const badgeWidth = count === 1 ? Math.max(28, 14 + digits * 7)
-      : 27 + (digits + String(count - 1).length) * 7;
+    const badgeWidth = count === 1 ? Math.max(32, 18 + digits * 7)
+      : 35 + (digits + String(count - 1).length) * 7;
     const size = Math.min(width, badgeWidth);
     const anchor = (position(sorted[start].frame) + position(sorted[end].frame)) / 2;
     const left = Math.max(size / 2, Math.min(width - size / 2, anchor));

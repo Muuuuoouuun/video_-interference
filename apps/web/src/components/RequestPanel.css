@@ -149,3 +149,7 @@
 .request-panel .rq-results-summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: -2px 0 12px; color: var(--muted, #8aa594); font-size: 10px; }
 .request-panel .rq-results-summary button { padding: 3px 0; color: var(--accent, #b4d8c4); font-size: 10px; }
 .empty-requests .outline-mint { margin-top: 14px; font-size: 11px; }
+
+.rq-current-version > .feedback-category-label { margin-left: 7px; }
+.request-item .request-number:not(.approved) { color: var(--pin-ink); border-color: rgb(var(--pin-rgb) / 45%); background: var(--pin-soft); border-radius: 50%; }
+.rq-comment-editor > .feedback-category-select { margin: 4px 0 9px; }

@@ -3,10 +3,12 @@ import { mkdir, mkdtemp, readFile, writeFile, copyFile, stat, rename, rm, readdi
 import { join } from 'node:path';
 import sharp from 'sharp';
 import { ffmpegPath, run } from './engine.mjs';
+import { planCanonicalFrameDecode } from './canonical-frames.mjs';
 import { planRequestContextFrames } from './context-bundle.mjs';
 import { drawingsSvg } from './drawings.mjs';
 import { projectComment } from '../../packages/core/comment-projection.mjs';
 import { projectDrawings, groupDrawings } from '../../packages/core/drawing-anchors.mjs';
+import { feedbackCategory, FEEDBACK_CATEGORY_LABELS } from '../../packages/core/feedback-category.mjs';
 import { isVisualOp, visualLayerId } from '../../packages/core/layer-snapshot.mjs';
 
 const fail = (message, status = 400) => Object.assign(new Error(message), { status });
@@ -66,6 +68,7 @@ export function renderFeedbackMarkdown(manifest) {
     const entry = manifest.feedback[index], still = representative(entry);
     lines.push(`<a id="feedback-${index + 1}"></a>`, '', `## ${index + 1}. ${entry.kind === 'note' ? '메모' : '피드백'} · ${summaryTime(entry)}`, '', `작성 v${entry.authored.versionNumber}: ${rangesText([entry.authored])}`, `현재 v${manifest.targetVersion.number}: ${rangesText(entry.current.ranges)}`);
     if (entry.current.status !== 'present') lines.push(`상태: ${statusLabel[entry.current.status]}`);
+    lines.push(`분야: ${FEEDBACK_CATEGORY_LABELS[entry.category] ?? (entry.kind === 'note' ? '메모' : '영상')}`);
     lines.push('', '### 장면 내용', '', entry.sceneDescription.text ? quote(entry.sceneDescription.text) : '별도 장면 설명 없음 · 아래 스틸 참고', '', '### 피드백', '', entry.feedback.original ? quote(entry.feedback.original) : '문자 피드백 없음 · 그림이나 첨부 자료 참고', '');
     for (let supplementIndex = 0; supplementIndex < entry.feedback.supplements.length; supplementIndex++) {
       const supplement = entry.feedback.supplements[supplementIndex];
@@ -123,7 +126,7 @@ export async function prepareFeedbackExport({ state, targetVersionId, commentIds
   for (const group of sourceGroups.values()) identities.push(await fileIdentity(group.videoPath));
   for (const record of attachmentRecords.values()) identities.push(await fileIdentity(record.path));
   const relevantOps = (snapshot.ops || []).filter(op => comments.some(comment => comment.id === op.commentId && comment.layerChange));
-  const cacheKey = digest({ format: 'feedback-export-v2-readable-brief', project: { id: snapshot.project.id, name: snapshot.project.name }, targetVersion, comments, authoredVersions: [...sourceGroups.values()].map(group => group.authored), identities, relevantOps, layers: comments.filter(comment => comment.layerChange).map(comment => layerSnapshots[comment.versionId]) });
+  const cacheKey = digest({ format: 'feedback-export-v3-categories', project: { id: snapshot.project.id, name: snapshot.project.name }, targetVersion, comments, authoredVersions: [...sourceGroups.values()].map(group => group.authored), identities, relevantOps, layers: comments.filter(comment => comment.layerChange).map(comment => layerSnapshots[comment.versionId]) });
   const finalDirectory = join(directory, cacheKey), manifestPath = join(finalDirectory, 'manifest.json'), markdownPath = join(finalDirectory, 'feedback.md'), archivePath = join(finalDirectory, 'feedback.zip');
   try {
     const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
@@ -142,8 +145,8 @@ export async function prepareFeedbackExport({ state, targetVersionId, commentIds
     let versionIndex = 0;
     for (const [versionId, group] of sourceGroups) {
       abort(signal); const folder = `scenes/version-${String(++versionIndex).padStart(3, '0')}`; await mkdir(join(work, folder), { recursive: true });
-      const frames = [...group.frames].sort((a, b) => a - b), select = frames.map(frame => `eq(n\\,${frame})`).join('+');
-      await run(ffmpegPath, ['-y', '-hide_banner', '-loglevel', 'error', '-threads', '1', '-i', group.videoPath, '-map', '0:v:0', '-an', '-sn', '-dn', '-vf', `select=${select},scale=w='min(960,iw)':h='min(960,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1`, '-fps_mode', 'vfr', '-frames:v', String(frames.length), '-q:v', '2', '-start_number', '0', '-threads', '1', join(work, folder, '%06d.jpg')], { signal, timeout: 120_000 }); ffmpegRuns++;
+      const frames = [...group.frames].sort((a, b) => a - b), decode = planCanonicalFrameDecode(frames);
+      await run(ffmpegPath, ['-y', '-hide_banner', '-loglevel', 'error', '-threads', '1', ...decode.inputArgs, '-i', group.videoPath, '-map', '0:v:0', '-an', '-sn', '-dn', '-vf', `select=${decode.select},scale=w='min(960,iw)':h='min(960,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1`, '-fps_mode', 'vfr', '-frames:v', String(frames.length), '-q:v', '2', '-start_number', '0', '-threads', '1', join(work, folder, '%06d.jpg')], { signal, timeout: 120_000 }); ffmpegRuns++;
       const actual = (await readdir(join(work, folder))).filter(name => /^\d{6}\.jpg$/.test(name)); if (actual.length !== frames.length) throw fail('작성 버전 길이와 스틸 개수가 맞지 않습니다. 자료는 생략하지 않았습니다.', 409);
       for (let index = 0; index < frames.length; index++) {
         const file = `${folder}/frame-${String(frames[index]).padStart(6, '0')}.jpg`;
@@ -176,7 +179,7 @@ export async function prepareFeedbackExport({ state, targetVersionId, commentIds
         if (!target) throw fail('기존 그래픽 변경 대상 기록을 찾지 못했습니다. 자료는 생략하지 않았습니다.', 409);
         layerMetadata = { layerChange: comment.layerChange, layerTarget: target, proposedOperations: relevantOps.filter(op => op.commentId === comment.id) };
       }
-      feedback.push({ id: comment.id, kind: comment.kind ?? 'request', status: comment.status, createdAt: comment.createdAt, sceneDescription: { source: comment.sceneDescription ? 'user' : 'not-provided', text: comment.sceneDescription ?? '' }, feedback: { original: comment.text, supplements: comment.supplements ?? [] }, authored: { versionId: authored.id, versionNumber: authored.number, frameIn: comment.frameIn, frameOut: comment.frameOut, contextFrame: comment.contextFrame ?? comment.frameIn, sourceRanges: comment.sourceRanges }, current: { versionId: targetVersion.id, ...projection, deletedSourceRanges: missingSourceRanges(comment.sourceRanges, targetVersion.timelineMap) }, drawings: plan.drawings, drawingProjection: projectDrawings(comment, authored, targetVersion), scenes, attachments: ids.map(id => attachmentFiles.get(id)), ...layerMetadata });
+      feedback.push({ id: comment.id, kind: comment.kind ?? 'request', category: feedbackCategory(comment), status: comment.status, createdAt: comment.createdAt, sceneDescription: { source: comment.sceneDescription ? 'user' : 'not-provided', text: comment.sceneDescription ?? '' }, feedback: { original: comment.text, supplements: comment.supplements ?? [] }, authored: { versionId: authored.id, versionNumber: authored.number, frameIn: comment.frameIn, frameOut: comment.frameOut, contextFrame: comment.contextFrame ?? comment.frameIn, sourceRanges: comment.sourceRanges }, current: { versionId: targetVersion.id, ...projection, deletedSourceRanges: missingSourceRanges(comment.sourceRanges, targetVersion.timelineMap) }, drawings: plan.drawings, drawingProjection: projectDrawings(comment, authored, targetVersion), scenes, attachments: ids.map(id => attachmentFiles.get(id)), ...layerMetadata });
     }
     const manifest = { schemaVersion: 1, kind: 'video-feedback-handoff', cacheKey, createdAt: new Date().toISOString(), localOnly: true, modelCalled: false, networkUsed: false, sourceVideoIncluded: false, renderedVideoIncluded: false, automaticTranscription: false, frameConvention: '30fps; half-open ranges [frameIn,frameOut)', project: { id: snapshot.project.id, name: snapshot.project.name }, targetVersion: { id: targetVersion.id, number: targetVersion.number, label: targetVersion.label, durationFrames: targetVersion.durationFrames, fps: 30 }, feedback, files: assets, stats: { commentCount: feedback.length, sceneCount: sceneFiles.size, annotationCount: assets.filter(file => file.role === 'annotation').length, attachmentCount: attachmentFiles.size, authoredVersionCount: sourceGroups.size }, diagnostics: { ffmpegRuns } };
     await writeFile(join(work, 'manifest.json'), JSON.stringify(manifest, null, 2)); await writeFile(join(work, 'feedback.md'), renderFeedbackMarkdown(manifest)); abort(signal);

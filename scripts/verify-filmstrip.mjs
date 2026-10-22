@@ -8,7 +8,7 @@ import sharp from 'sharp';
 import { ffmpegPath, ingest, mapToSource, renderVideo, run } from '../apps/worker/engine.mjs';
 
 const hash = async path => createHash('sha256').update(await readFile(path)).digest('hex');
-const codeFiles = ['apps/worker/filmstrip.mjs', 'apps/worker/engine.mjs'];
+const codeFiles = ['apps/worker/filmstrip.mjs', 'apps/worker/canonical-frames.mjs', 'apps/worker/engine.mjs'];
 
 /** Measure actual FFmpeg starts independently of the filmstrip module's diagnostics. */
 export async function measureFilmstrip({ versionId, videoPath, durationFrames, directory }) {

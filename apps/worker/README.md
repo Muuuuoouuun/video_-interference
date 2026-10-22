@@ -14,7 +14,7 @@ Local rules read the original plus all additions. An addition can supply a missi
 
 Conflicting new speed requests in one batch return 409 when their source ranges overlap and their factors differ. A new request in a later version may still replace inherited speed settings. New subtitle, overlay, audio or speed requests whose entire range disappears from the final output also return 409 before a job is created. Cutting away inherited layers in a later version remains supported.
 
-Drawing remains a review annotation until a request explicitly asks “이 그림/도형 그대로 영상에 넣어줘”. Interpretation then proposes `overlay` with `{kind:'drawing', drawings:Drawing[]}`. Approval is required before the renderer burns those exact vectors into the selected source-anchored range. Rectangle, ellipse, line, arrow and freehand pen shapes are supported; every request holds up to 30 shapes and each pen up to 2,000 normalized points. Optional `strokeWidth` defaults to 3 in a logical SVG viewport whose width is 1000 and height is `1000 * videoHeight / videoWidth`. Color and closed-shape fill use `#RRGGBB`; fill defaults to `none`. Opacity defaults to 1 and accepts 0–1. Open pen/line/arrow strokes remain unfilled, and arrowheads use the stroke color. Legacy annotations without style fields keep working.
+Drawing remains a review annotation until a request explicitly asks “이 그림/도형 그대로 영상에 넣어줘”. Interpretation then proposes `overlay` with `{kind:'drawing', drawings:Drawing[]}`. Approval is required before the renderer burns those exact vectors into the selected source-anchored range. Rectangle, ellipse, line, arrow, freehand pen and text annotations are supported; every request holds up to 30 shapes and each pen up to 2,000 normalized points. Optional `strokeWidth` defaults to 3 in a logical SVG viewport whose width is 1000 and height is `1000 * videoHeight / videoWidth`. Color and closed-shape fill use `#RRGGBB`; fill defaults to `none`. Opacity defaults to 1 and accepts 0–1. Open pen/line/arrow strokes remain unfilled, and arrowheads use the stroke color. Text annotations store `text` (1–500 characters, up to 8 lines) and a normalized `region`; browser and native SVG share line positions and fitted line lengths. Legacy annotations without style fields keep working.
 
 Optional `Drawing.frame` records each annotation's authored-version frame. Explicit values must be integers within that version; omitted legacy values keep their stored JSON shape and use `comment.contextFrame ?? comment.frameIn`. Supplements and restarts retain every anchor. Different frames are independent location annotations. Static insertion of more than one frame group is held for clarification in local/cloud validation, parameter editing and rendering: copy one scene's drawings into a new request before insertion. Raster cache keys exclude drawing IDs and frame metadata, with frame validation before cache lookup.
 
@@ -59,6 +59,39 @@ Without both `ANTHROPIC_API_KEY` and `ANTHROPIC_MODEL` in the process environmen
 When available, the initial project copies the repository-local `fixtures/demo.mp4` as “인터랙티브 수업” and seeds two unapproved requests: source 5–9 seconds at 2× and 9–12 seconds with the subtitle “배움이 이어지는 순간”. Without that optional sample, the server starts empty and accepts a user video. Import limits are 10 minutes, SDR, 2 GB video, 50 MB image and 100 MB voice. Only static images are accepted as visual attachments in this draft. It serves a production `dist/` if present. Opening another source archives the preceding workspace state as a JSON file in `storage/archives/` and preserves its media files.
 
 Security: loopback binding, exact Host/Origin checks, cross-site request rejection, no permissive CORS, generated storage paths, no caller-provided commands or filesystem paths, image decoding validation, ffprobe media validation, subprocess argument arrays with no shell, and approval validation before rendering. SQLite persists the local project and immutable render snapshots. Interrupted jobs are marked failed on restart.
+
+## Still extraction and request reliability
+
+Scene bundles, feedback exports and timeline filmstrips seek past unused leading
+footage before selecting frames. The shared decoder plan applies only to the
+zero-based 30fps review/render versions. It seeks to a whole second with one
+second of preroll and adjusts the local frame indexes, retaining all requested
+scene and drawing anchors in a single FFmpeg pass. Source VFR footage must be
+normalized before using this path.
+
+A local synthetic benchmark on 2026-10-16 used a 120-second, 960×540, 30fps H.264
+video and a point comment at frame 3457. Complete context-bundle preparation
+(JPEG plus manifest) was compared in the same Node v25.8.2 process after one
+warm-up per implementation, alternating order over five measured rounds:
+
+| Implementation | Times (ms) | Median |
+| --- | --- | --- |
+| Decode from frame zero | 510, 507, 501, 521, 509 | 509 ms |
+| Seek unused prefix | 33, 33, 32, 32, 33 | 33 ms |
+
+All ten scene JPEGs had the same SHA-256. This measures a late point extraction
+with warm file caches; it does not measure import, rendering, UI response time
+or cold external-disk startup. Requests including early scenes must still decode
+from their earliest anchor.
+
+JSON requests are limited to 2,000,000 actual bytes and decoded once, preserving
+Korean and emoji even when UTF-8 bytes span network chunks. Malformed UTF-8,
+invalid JSON and non-object payloads are rejected before project mutation.
+Native regression tests compare sought frames against full decoding at GOP,
+second and EOF boundaries, including feedback-export and drawing anchors.
+The HTTP integration test checks split Korean text through API and SQLite.
+
+Run `npm test` and `npm run build` for verification.
 
 ## Gemini feedback-brief test
 

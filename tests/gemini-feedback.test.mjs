@@ -48,7 +48,10 @@ async function fixture(t) {
 }
 
 test('Gemini preparation sends every selected still, annotation and image once with bindings, excluding video, voice and private metadata', async t => {
-  const f = await fixture(t), before = await readFile(f.manifestPath), prepared = await prepareGeminiFeedback(f.manifestPath);
+  const f = await fixture(t);
+  f.entry.drawings.push({ id: 'text-one', kind: 'text', text: '한글 텍스트 메모', color: '#2655e3', frame: 75, points: [], region: { x: .2, y: .2, w: .4, h: .1 } });
+  await writeFile(f.manifestPath, JSON.stringify(f.manifest));
+  const before = await readFile(f.manifestPath), prepared = await prepareGeminiFeedback(f.manifestPath);
   assert.equal(prepared.summary.commentCount, 2);
   assert.equal(prepared.summary.imageCount, 4);
   assert.equal(prepared.summary.omittedVoiceCount, 1);
@@ -60,6 +63,7 @@ test('Gemini preparation sends every selected still, annotation and image once w
   const parts = prepared.request.contents[0].parts, text = JSON.parse(parts[0].text);
   assert.deepEqual(text.feedback[0].feedback.supplements.map(item => item.text), f.entry.feedback.supplements.map(item => item.text));
   assert.equal(text.feedback[1].kind, 'note');
+  assert.equal(text.feedback[0].drawings.find(drawing => drawing.kind === 'text').text, '한글 텍스트 메모');
   assert.equal(text.feedback[0].attachments.find(item => item.role === 'voice').included, false);
   assert.equal(parts.filter(part => part.inlineData).length, 4);
   assert.deepEqual(new Set(parts.filter(part => part.inlineData).map(part => part.inlineData.mimeType)), new Set(['image/jpeg', 'image/png']));

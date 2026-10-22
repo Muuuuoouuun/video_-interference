@@ -60,3 +60,5 @@
   .editor-layout .request-rail { overflow-y: auto; overscroll-behavior: contain; }
   .composer-wrap { max-height: min(58dvh, calc(100dvh - 280px)); overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding-right: 4px; }
 }
+
+.composer-category-row { display: flex; align-items: center; gap: 7px; margin: -1px 0 9px; color: var(--muted); font-size: 10px; }

@@ -1,10 +1,11 @@
+import { textDrawingLayout, DRAWING_TEXT_FONT, MAX_DRAWING_TEXT, MAX_DRAWING_TEXT_LINES, drawingTextLines } from '../../packages/core/overlay-text.mjs';
 import { randomUUID } from 'node:crypto';
 
-const kinds = new Set(['rect', 'ellipse', 'line', 'arrow', 'pen']);
+const kinds = new Set(['rect', 'ellipse', 'line', 'arrow', 'pen', 'text']);
 const colorPattern = /^#[a-f\d]{6}$/i;
 const error = message => Object.assign(new Error(message), { status: 400 });
 const numberIn = (value, min, max) => Number.isFinite(value) && value >= min && value <= max;
-const fields = new Set(['id', 'kind', 'color', 'points', 'region', 'strokeWidth', 'opacity', 'fill', 'frame']);
+const fields = new Set(['id', 'kind', 'color', 'points', 'region', 'strokeWidth', 'opacity', 'fill', 'frame', 'text']);
 
 /** Styles stay optional so persisted v0.1 annotations retain their original JSON shape. */
 export function validateDrawings(value = [], { durationFrames } = {}) {
@@ -20,13 +21,15 @@ export function validateDrawings(value = [], { durationFrames } = {}) {
     if (drawing.kind === 'pen' && !drawing.points.length) throw error('펜 드로잉에는 한 개 이상의 점이 필요합니다.');
     if (['rect', 'ellipse'].includes(drawing.kind) && !region && drawing.points.length !== 2) throw error('사각형과 타원에는 영역 또는 두 모서리 점이 필요합니다.');
     if (['rect', 'ellipse'].includes(drawing.kind) && !region && (drawing.points[0].x === drawing.points[1].x || drawing.points[0].y === drawing.points[1].y)) throw error('사각형과 타원의 영역은 너비와 높이가 있어야 합니다.');
+    if (drawing.kind === 'text' && (!region || typeof drawing.text !== 'string' || !drawing.text.trim() || drawing.text.length > MAX_DRAWING_TEXT || drawingTextLines(drawing.text).length > MAX_DRAWING_TEXT_LINES || /[\u0000-\u0008\u000b\u000c\u000e-\u001f]/u.test(drawing.text))) throw error('텍스트는 영역과 1~500자, 최대 8줄의 내용이 필요합니다.');
+    if (drawing.text !== undefined && drawing.kind !== 'text') throw error('텍스트 내용은 텍스트 도구에서만 사용할 수 있습니다.');
     if (drawing.strokeWidth !== undefined && !numberIn(drawing.strokeWidth, 0.25, 64)) throw error('선 두께는 기준 영상 너비 1000에서 0.25~64 사이여야 합니다.');
     if (drawing.opacity !== undefined && !numberIn(drawing.opacity, 0, 1)) throw error('드로잉 투명도는 0~1 사이여야 합니다.');
     if (drawing.fill !== undefined && drawing.fill !== 'none' && !colorPattern.test(drawing.fill)) throw error('드로잉 채우기는 #RRGGBB 또는 none 형식이어야 합니다.');
     if (drawing.frame !== undefined && (!Number.isInteger(drawing.frame) || drawing.frame < 0 || durationFrames !== undefined && drawing.frame >= durationFrames)) throw error('그림 기준 프레임은 작성 버전의 실제 정수 프레임이어야 합니다.');
     const shape = { id: String(drawing.id || `drawing_${randomUUID().slice(0, 12)}`).slice(0, 80), kind: drawing.kind, color: drawing.color, points: drawing.points.map(p => ({ x: p.x, y: p.y })) };
     if (region) shape.region = { x: region.x, y: region.y, w: region.w, h: region.h };
-    for (const key of ['strokeWidth', 'opacity', 'fill', 'frame']) if (drawing[key] !== undefined) shape[key] = drawing[key];
+    for (const key of ['strokeWidth', 'opacity', 'fill', 'frame', 'text']) if (drawing[key] !== undefined) shape[key] = drawing[key];
     return shape;
   });
 }
@@ -52,7 +55,11 @@ export function drawingsSvg(width, height, drawings) {
     const fill = ['rect', 'ellipse'].includes(drawing.kind) ? drawing.fill ?? 'none' : 'none';
     const attrs = `stroke="${drawing.color}" stroke-width="${strokeWidth}" stroke-linecap="round" stroke-linejoin="round" fill="${fill}"`;
     let body;
-    if (['rect', 'ellipse'].includes(drawing.kind)) {
+    if (drawing.kind === 'text') {
+      const layout = textDrawingLayout(drawing, viewportHeight);
+      const escape = value => value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('\"', '&quot;').replaceAll("'", '&apos;');
+      body = layout.lines.filter(line => line.text.length).map(line => `<text x="${line.x}" y="${line.y}" font-family="${DRAWING_TEXT_FONT}" font-size="${layout.fontSize}" font-weight="600" textLength="${line.width}" lengthAdjust="spacingAndGlyphs" xml:space="preserve" fill="${drawing.color}">${escape(line.text)}</text>`).join('');
+    } else if (['rect', 'ellipse'].includes(drawing.kind)) {
       const a = drawing.points[0], b = drawing.points[1];
       const region = drawing.region || { x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), w: Math.abs(b.x - a.x), h: Math.abs(b.y - a.y) };
       const x = region.x * 1000, y = region.y * viewportHeight, w = region.w * 1000, h = region.h * viewportHeight;

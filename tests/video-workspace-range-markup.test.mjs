@@ -51,7 +51,7 @@ test('SSR expanded directing workspace exposes a height separator and explicit m
   const html = markup();
   assert.match(html, /aria-label="영상과 타임라인 높이 조절" aria-orientation="horizontal"/);
   assert.match(html, /aria-label="타임라인 최소화 · 영상 집중" aria-expanded="true"/);
-  assert.match(html, /--vi-timeline-height:280px/);
+  assert.match(html, /--vi-timeline-height:240px/);
   assert.equal((html.match(/<video\b/g) ?? []).length, 1);
 });
 
@@ -79,7 +79,7 @@ test('SSR persisted compact timeline retains seeking, markers and range handles 
 test('SSR layout remains available when persisted settings cannot be read', () => {
   const html = withLayoutStorage(() => { throw new Error('storage unavailable'); }, () => markup());
   assert.match(html, /data-timeline-compact="false"/);
-  assert.match(html, /--vi-timeline-height:280px/);
+  assert.match(html, /--vi-timeline-height:240px/);
   assert.match(html, /aria-label="타임라인 최소화 · 영상 집중"/);
 });
 function buttonWithText(html, text) {
@@ -118,6 +118,41 @@ test('SSR active range exposes both endpoints and an explicit clear action', () 
   assert.doesNotMatch(html, /class="vi-point-fields vi-selection"/);
 });
 
+test('SSR saved range spans remain with numbered markers without a selection or while drafting elsewhere', () => {
+  const saved = { ...comment, id: 'saved-range', frameIn: 150, frameOut: 270, sourceRanges: [{ frameIn: 150, frameOut: 270 }] };
+  for (const rangeActive of [false, true]) {
+    const html = markup({ comments: [comment, saved], rangeActive, range: { in: 600, out: 720 } });
+    assert.match(html, /class="vi-saved-ranges" aria-hidden="true"/);
+    assert.match(html, /class="vi-range-selection vi-saved-range" data-marker-key="saved-range-0" data-feedback-category="video" style="left:16\.666666666666664%;width:13\.333333333333334%"/);
+    assert.doesNotMatch(html, /data-marker-key="saved-point-0"/);
+    assert.equal((html.match(/class="vi-comment-marker/g) ?? []).length, 2);
+    assert.equal((html.match(/class="vi-range-selection vi-saved-range"/g) ?? []).length, 1);
+  }
+});
+
+test('SSR selected saved range is drawn once while other overlapping saved ranges stay visible', () => {
+  const saved = { ...comment, id: 'saved-range', frameIn: 150, frameOut: 270, sourceRanges: [{ frameIn: 150, frameOut: 270 }] };
+  const overlap = { ...saved, id: 'overlap', frameOut: 300, sourceRanges: [{ frameIn: 150, frameOut: 300 }] };
+  const html = markup({ comments: [saved, overlap], selectedCommentId: saved.id, annotationsReadOnly: true, rangeActive: true, range: { in: 150, out: 270 } });
+  assert.doesNotMatch(html, /data-marker-key="saved-range-0"/);
+  assert.match(html, /data-marker-key="overlap-0"/);
+  assert.equal((html.match(/class="vi-range-selection" data-readonly="true"/g) ?? []).length, 1);
+  assert.match(html, /aria-label="가까운 마커 2개 · 피드백 1, 피드백 2"/);
+});
+
+test('SSR cut feedback keeps separate surviving spans and removes fully deleted spans', () => {
+  const cut = { ...version, id: 'cut', durationFrames: 600, timelineMap: [
+    { sourceIn: 0, sourceOut: 300, outputIn: 0, outputOut: 300, speed: 1, volume: 1 },
+    { sourceIn: 600, sourceOut: 900, outputIn: 300, outputOut: 600, speed: 1, volume: 1 },
+  ] };
+  const partial = { ...comment, id: 'partial', frameIn: 250, frameOut: 650, sourceRanges: [{ frameIn: 250, frameOut: 650 }] };
+  const deleted = { ...comment, id: 'deleted', frameIn: 350, frameOut: 400, sourceRanges: [{ frameIn: 350, frameOut: 400 }] };
+  const html = markup({ version: cut, versions: [version, cut], comments: [partial, deleted] });
+  assert.match(html, /data-marker-key="partial-0" data-feedback-category="video" style="left:41\.66666666666667%;width:8\.333333333333332%"/);
+  assert.match(html, /data-marker-key="partial-1" data-feedback-category="video" style="left:50%;width:8\.333333333333332%"/);
+  assert.doesNotMatch(html, /data-marker-key="deleted-/);
+});
+
 test('SSR saved point review offers selection exit without exposing editable range controls', () => {
   const html = markup({ annotationsReadOnly: true, selectedCommentId: comment.id, currentFrame: 420, range: { in: 420, out: 421 } });
   assertNoRangeControls(html);
@@ -131,7 +166,7 @@ test('SSR player and marker use the same rounded timestamp as comment labels', (
   const html = markup({ currentFrame: 2, comments: [{ ...comment, frameIn: 2, frameOut: 3, contextFrame: 2, sourceRanges: [{ frameIn: 2, frameOut: 3 }] }] });
   assert.match(html, /<strong>00:00\.07<\/strong>/);
   assert.match(html, /aria-label="피드백 1: 00:00\.07 여기 자막 수정"/);
-  assert.match(html, /title="피드백 1 · 00:00\.07 · 여기 자막 수정"/);
+  assert.match(html, /title="피드백 1 · 00:00\.07 · 여기 자막 수정 · 영상"/);
   assert.doesNotMatch(html, /00:00\.06/);
 });
 
@@ -184,4 +219,20 @@ test('SSR exposes a focused seek ruler without flattening the interactive commen
   assert.ok(rulerEnd < html.indexOf('class="vi-marker-rail"'));
   assert.match(html, /role="group" aria-label="타임라인 댓글 마커"/);
   assert.match(markup({ editingLocked: true }), /class="vi-timeline-ruler" role="slider"[^>]*tabindex="-1"[^>]*aria-disabled="true"/);
+});
+
+
+test('SSR categories color saved pins, projected spans and the selected range consistently', () => {
+  for (const category of ['subtitle', 'video', 'audio', 'effect', 'note']) {
+    const saved = { ...comment, id: 'colored', kind: category === 'note' ? 'note' : 'request', category: category === 'note' ? undefined : category, frameIn: 150, frameOut: 270, sourceRanges: [{ frameIn: 150, frameOut: 270 }] };
+    const unselected = markup({ comments: [saved] });
+    assert.match(unselected, new RegExp(`class="vi-comment-marker" data-feedback-category="${category}"`));
+    assert.match(unselected, new RegExp(`data-marker-key="colored-0" data-feedback-category="${category}"`));
+    const selected = markup({ comments: [saved], selectedCommentId: saved.id, annotationsReadOnly: true, rangeActive: true, range: { in: 150, out: 270 } });
+    assert.match(selected, new RegExp(`class="vi-timeline" data-feedback-category="${category}"`));
+    assert.doesNotMatch(selected, /data-marker-key="colored-0"/);
+  }
+  const mixed = markup({ comments: [comment, { ...comment, id: 'sound', category: 'audio' }] });
+  assert.match(mixed, /data-mixed="true"/);
+  assert.match(mixed, /aria-description="영상·사운드 분야"/);
 });

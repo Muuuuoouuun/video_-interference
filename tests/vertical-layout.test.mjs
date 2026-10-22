@@ -6,12 +6,12 @@ import {
 } from '../packages/core/vertical-layout.mjs';
 
 test('expanded timeline preferences accept only finite numbers and recover malformed storage', () => {
-  assert.equal(TIMELINE_HEIGHT_DEFAULT, 280);
-  for (const value of [null, undefined, true, '420', [], {}, NaN, Infinity, -Infinity]) assert.equal(sanitizeTimelineHeight(value), 280);
+  assert.equal(TIMELINE_HEIGHT_DEFAULT, 240);
+  for (const value of [null, undefined, true, '420', [], {}, NaN, Infinity, -Infinity]) assert.equal(sanitizeTimelineHeight(value), 240);
   assert.equal(sanitizeTimelineHeight(240.5), 240.5);
   assert.equal(sanitizeTimelineHeight(-10), 180);
   assert.equal(sanitizeTimelineHeight(900), 600);
-  for (const raw of [null, '', '{', 'null', 'false', '[]', '{}', '"420"', 'Infinity']) assert.equal(decodeTimelineHeight(raw), 280);
+  for (const raw of [null, '', '{', 'null', 'false', '[]', '{}', '"420"', 'Infinity']) assert.equal(decodeTimelineHeight(raw), 240);
   assert.equal(decodeTimelineHeight('420.5'), 420.5);
   assert.equal(decodeTimelineHeight('900'), 600);
 });

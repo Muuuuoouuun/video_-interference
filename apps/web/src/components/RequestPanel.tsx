@@ -1,22 +1,24 @@
 import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Check, Clock3, Brackets, FileText, MessageSquare, SlidersHorizontal, Type, Volume2, X, Image, Scissors, RotateCcw, PencilLine, LoaderCircle, Trash2, Plus, ChevronUp, ChevronDown, Search, LayoutList, StickyNote, ArrowDownWideNarrow } from 'lucide-react';
-import type { Attachment, Comment, EditOp, Region, Version } from '../../../../packages/core/types';
+import type { Attachment, Comment, EditOp, Region, Version, FeedbackCategory } from '../../../../packages/core/types';
 import { projectComment } from '../../../../packages/core/comment-projection.mjs';
 import { selectFeedbackList } from '../../../../packages/core/feedback-list.mjs';
 import type { FeedbackSort } from '../../../../packages/core/feedback-list.mjs';
 import { projectDrawings } from '../../../../packages/core/drawing-anchors.mjs';
 import { time, duration } from '../format';
 import { AttachmentGallery } from './AttachmentGallery';
+import { feedbackCategory, FEEDBACK_CATEGORY_LABELS } from '../../../../packages/core/feedback-category.mjs';
+import { FeedbackCategorySelect } from './FeedbackCategory';
 import './RequestPanel.css';
 
 const labels = { cut: '구간 삭제', trim: '구간만 유지', speed: '배속', subtitle: '자막 추가', overlay: '오버레이', audio: '음량', note: '메모' };
 const filterIcons = { all: LayoutList, feedback: MessageSquare, notes: StickyNote, awaiting: Clock3, pending: SlidersHorizontal, applied: Check };
 const icons = { cut: Scissors, trim: Scissors, speed: Clock3, subtitle: Type, overlay: Image, audio: Volume2, note: FileText };
 export interface PreparedContextBundle { manifestUrl: string; archiveUrl?: string; sceneCount: number; drawingSceneCount: number; attachmentCount: number }
-interface Props { headerActions?: ReactNode; keyboardEnabled?: boolean; editingMode?: boolean; revealToken?: number; comments: Comment[]; attachments: Attachment[]; ops: EditOp[]; versions: Version[]; currentVersion: Version; selectedId: string | null; busy: boolean; onSelect: (comment: Comment) => void; onSelectAuthored: (comment: Comment) => void; onOp: (id: string, patch: Record<string, unknown>) => Promise<boolean>; onInterpret: (id: string) => Promise<void>; onPrepareContextBundle: (id: string) => Promise<PreparedContextBundle | null>; onSupplement: (id: string, text: string) => Promise<boolean>; onEditComment: (id: string, patch: { text: string; sceneDescription: string }) => Promise<boolean>; onDeleteComment: (id: string) => Promise<boolean>; onDraftChange?: (hasContent: boolean) => void; previewOpId?: string|null; onPreviewOverlay?: (id: string) => void }
+interface Props { headerActions?: ReactNode; keyboardEnabled?: boolean; editingMode?: boolean; revealToken?: number; comments: Comment[]; attachments: Attachment[]; ops: EditOp[]; versions: Version[]; currentVersion: Version; selectedId: string | null; busy: boolean; onSelect: (comment: Comment) => void; onSelectAuthored: (comment: Comment) => void; onOp: (id: string, patch: Record<string, unknown>) => Promise<boolean>; onInterpret: (id: string) => Promise<void>; onPrepareContextBundle: (id: string) => Promise<PreparedContextBundle | null>; onSupplement: (id: string, text: string) => Promise<boolean>; onEditComment: (id: string, patch: { text: string; sceneDescription: string; category?: FeedbackCategory }) => Promise<boolean>; onDeleteComment: (id: string) => Promise<boolean>; onDraftChange?: (hasContent: boolean) => void; previewOpId?: string|null; onPreviewOverlay?: (id: string) => void }
 
-interface CommentDraft { text: string; sceneDescription: string; originalText: string; originalSceneDescription: string }
-function isChangedDraft(draft: CommentDraft) { return draft.text !== draft.originalText || draft.sceneDescription !== draft.originalSceneDescription; }
+interface CommentDraft { text: string; sceneDescription: string; originalText: string; originalSceneDescription: string; category: FeedbackCategory; originalCategory: FeedbackCategory }
+function isChangedDraft(draft: CommentDraft) { return draft.text !== draft.originalText || draft.sceneDescription !== draft.originalSceneDescription || draft.category !== draft.originalCategory; }
 
 function rangeLabel(frameIn: number, frameOut: number) { return frameOut - frameIn === 1 ? time(frameIn) : `${time(frameIn)} – ${time(frameOut)}`; }
 
@@ -173,7 +175,7 @@ export const RequestPanel = memo(function RequestPanel({ headerActions, keyboard
   function startCommentEdit(comment: Comment) {
     if (busy || commentInFlight.current || comment.layerChange || comment.status === 'applied' || opsByComment.get(comment.id)?.some(op => op.status === 'applied')) return;
     selectFromList(comment);
-    setCommentDrafts(drafts => drafts[comment.id] && isChangedDraft(drafts[comment.id]) ? drafts : { ...drafts, [comment.id]: { text: comment.text, sceneDescription: comment.sceneDescription ?? '', originalText: comment.text, originalSceneDescription: comment.sceneDescription ?? '' } });
+    setCommentDrafts(drafts => drafts[comment.id] && isChangedDraft(drafts[comment.id]) ? drafts : { ...drafts, [comment.id]: { text: comment.text, sceneDescription: comment.sceneDescription ?? '', originalText: comment.text, originalSceneDescription: comment.sceneDescription ?? '', category: comment.category ?? 'video', originalCategory: comment.category ?? 'video' } });
     setEditingCommentId(comment.id); setFailedCommentId(null); setFilter('all'); setSearchQuery(''); setResumeCommentId(comment.id);
   }
   function cancelCommentEdit(id: string) {
@@ -187,7 +189,7 @@ export const RequestPanel = memo(function RequestPanel({ headerActions, keyboard
     if (!draft || !isChangedDraft(draft) || busy || commentInFlight.current) return;
     commentInFlight.current = true; setSavingCommentId(comment.id); setFailedCommentId(null);
     try {
-      if (await onEditComment(comment.id, { text: draft.text, sceneDescription: draft.sceneDescription })) {
+      if (await onEditComment(comment.id, { text: draft.text, sceneDescription: draft.sceneDescription, category: comment.kind === 'note' ? undefined : draft.category })) {
         setEditingCommentId(null); setSearchQuery(''); setFilter('all'); setPendingRevealId(comment.id);
         setFocusAfterAction([`edit-feedback-${comment.id}`]);
         setCommentDrafts(drafts => { const next = { ...drafts }; delete next[comment.id]; return next; });
@@ -314,7 +316,7 @@ export const RequestPanel = memo(function RequestPanel({ headerActions, keyboard
         const mappedLabel = projection.status === 'deleted' ? '현재 버전에서 삭제된 구간' : projection.status === 'unavailable' ? '현재 버전에서 위치 확인 불가' : projection.ranges.map(range => rangeLabel(range.frameIn, range.frameOut)).join(', ');
         const index = numberById.get(comment.id)!;
         const showAuthoredPosition = differentVersion || !authored || projection.status !== 'present';
-        return <article key={comment.id} id={`request-${comment.id}`} data-feedback-id={comment.id} className={`request-item ${selectedId === comment.id ? 'selected' : ''}`} tabIndex={0} aria-label={`피드백 ${index}`} onFocus={event => { if (event.target === event.currentTarget && !supplementBusy) selectFromList(comment); }}>
+        return <article key={comment.id} id={`request-${comment.id}`} data-feedback-id={comment.id} data-feedback-category={feedbackCategory(comment)} className={`request-item ${selectedId === comment.id ? 'selected' : ''}`} tabIndex={0} aria-label={`피드백 ${index}`} onFocus={event => { if (event.target === event.currentTarget && !supplementBusy) selectFromList(comment); }}>
           <div className="rq-card-heading">
           <button id={`locate-feedback-${comment.id}`} className="request-location rq-projected-location" disabled={supplementBusy} onClick={() => selectFromList(comment)} aria-label={`요청 ${index}, 현재 버전 v${currentVersion.number}, ${mappedLabel}`}>
             <span className={`request-number ${related.some(op => op.status === 'approved' || op.status === 'applied') ? 'approved' : ''}`}>{index}</span>
@@ -323,7 +325,7 @@ export const RequestPanel = memo(function RequestPanel({ headerActions, keyboard
                 const isPoint = range.frameOut - range.frameIn === 1;
                 return <span className="rq-time-range" key={rangeIndex} title={isPoint ? '피드백 시점' : '피드백 구간 · 끝 시점은 포함하지 않음'}>{isPoint ? <Clock3 size={13} aria-hidden="true"/> : <Brackets size={13} aria-hidden="true"/>}<span className="rq-time-value">{time(range.frameIn)}</span>{!isPoint ? <><span className="rq-time-separator" aria-hidden="true">–</span><span className="rq-time-value">{time(range.frameOut)}</span></> : null}</span>;
               })}</span>}
-              <span className="rq-current-version">현재 v{currentVersion.number}</span>
+              <span className="rq-current-version">현재 v{currentVersion.number}<span className="feedback-category-label"><span className="feedback-category-dot" aria-hidden="true"/>{FEEDBACK_CATEGORY_LABELS[feedbackCategory(comment)]}</span></span>
             </span>
           </button>
           <div className="rq-card-actions" role="group" aria-label={`피드백 ${index} 관리`}>
@@ -340,11 +342,12 @@ export const RequestPanel = memo(function RequestPanel({ headerActions, keyboard
           {!commentEditorOpen && comment.sceneDescription ? <div className="rq-scene-description"><span>장면 내용 · 직접 작성</span><p>{comment.sceneDescription}</p></div> : null}
           {!commentEditorOpen ? <p className="request-text" onDoubleClick={() => startCommentEdit(comment)} title={hasApplied || isLayerChange ? undefined : '두 번 클릭해서 수정'}>{comment.text || (comment.voiceAssetId ? '음성 지시가 저장되었습니다.' : comment.attachmentIds.length ? '첨부 자료가 저장되었습니다.' : comment.sceneDescription ? '장면 기록' : '그림으로 남긴 피드백')}</p> : <form className="rq-comment-editor" aria-label="저장된 피드백 수정" onSubmit={event => { event.preventDefault(); void saveCommentEdit(comment); }} onKeyDown={event => { if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return; if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); if (canSaveEdit) void saveCommentEdit(comment); } else if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); cancelCommentEdit(comment.id); } }}>
             <div className="rq-editor-heading"><PencilLine size={14}/><strong>피드백 수정</strong><span>시간·그림 유지</span></div>
+            {!isNote ? <FeedbackCategorySelect value={commentDraft.category} label="수정할 피드백 분야" disabled={supplementBusy} onChange={value => { if (value !== 'note') setCommentDrafts(drafts => ({ ...drafts, [comment.id]: { ...drafts[comment.id], category: value } })); }}/> : null}
             <label htmlFor={`comment-scene-${comment.id}`}>장면 내용 <span>선택</span></label>
             <textarea id={`comment-scene-${comment.id}`} className="rq-scene-editor" value={commentDraft.sceneDescription} maxLength={500} disabled={supplementBusy} placeholder="이때 영상에 어떤 내용이 나오나요?" onChange={event => { const sceneDescription = event.target.value; setCommentDrafts(drafts => ({ ...drafts, [comment.id]: { ...drafts[comment.id], sceneDescription } })); setFailedCommentId(null); }}/>
             <label htmlFor={`comment-text-${comment.id}`}>{isNote ? '메모 내용' : '편집 피드백'}</label>
             <textarea id={`comment-text-${comment.id}`} value={commentDraft.text} maxLength={5000} disabled={supplementBusy} placeholder="어떤 부분을 어떻게 바꿀까요?" onChange={event => { const text = event.target.value; setCommentDrafts(drafts => ({ ...drafts, [comment.id]: { ...drafts[comment.id], text } })); setFailedCommentId(null); }}/>
-            {related.length > 0 ? <p className="rq-supplement-approval">수정하면 기존 해석과 승인을 해제합니다.</p> : null}
+            {related.length > 0 && (commentDraft.text !== commentDraft.originalText || commentDraft.sceneDescription !== commentDraft.originalSceneDescription) ? <p className="rq-supplement-approval">수정하면 기존 해석과 승인을 해제합니다.</p> : null}
             {failedCommentId === comment.id ? <p className="rq-supplement-error" role="alert">저장하지 못했습니다. 수정한 내용은 유지됩니다.</p> : null}
             <div className="rq-editor-footer"><span>⌘ / Ctrl + Enter 저장</span><div><button type="button" className="quiet" disabled={supplementBusy} onClick={() => cancelCommentEdit(comment.id)}>취소</button><button type="submit" className="outline-mint" disabled={supplementBusy || !canSaveEdit}>{savingCommentId === comment.id ? <LoaderCircle size={13} className="spinning"/> : <Check size={13}/>}수정 저장</button></div></div>
           </form>}

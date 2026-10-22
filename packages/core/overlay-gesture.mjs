@@ -5,6 +5,7 @@ export function createOverlayGesture({ kind, original, start, width, height, han
   let latest = { ...start }, preview = original, dirty = false;
   const newPen = kind === 'create' && original.kind === 'pen';
   let penPoints = newPen ? original.points.map(point => ({ ...point })) : null;
+  let moveBounds;
   let resizeOffset;
   if (kind === 'resize') {
     const bounds = drawingBounds(original);
@@ -37,6 +38,16 @@ export function createOverlayGesture({ kind, original, start, width, height, han
   }
 
   return {
+    /** Live translation needs only a bounded offset. Materialize vertices on finish. */
+    translation() {
+      if (kind !== 'move') return null;
+      moveBounds ??= drawingBounds(original);
+      const dx = latest.x - start.x, dy = latest.y - start.y;
+      return {
+        x: Math.max(-moveBounds.x, Math.min(1 - moveBounds.x - moveBounds.w, Number.isFinite(dx) ? dx : -moveBounds.x)),
+        y: Math.max(-moveBounds.y, Math.min(1 - moveBounds.y - moveBounds.h, Number.isFinite(dy) ? dy : -moveBounds.y)),
+      };
+    },
     update(point, samples = []) {
       if (newPen) {
         for (const sample of samples) appendPenPoint(sample);

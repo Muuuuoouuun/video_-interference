@@ -5,7 +5,7 @@ const normalizedPoint = (point) => ({ x: clamp(point.x), y: clamp(point.y) });
 const isValidRegion = (region) => region && ['x', 'y', 'w', 'h'].every((key) => Number.isFinite(region[key])) && region.x >= 0 && region.y >= 0 && region.w >= 0 && region.h >= 0 && region.x + region.w <= 1.00001 && region.y + region.h <= 1.00001;
 
 export function drawingBounds(drawing) {
-  if ((drawing.kind === 'rect' || drawing.kind === 'ellipse') && drawing.region) return { ...drawing.region };
+  if ((drawing.kind === 'rect' || drawing.kind === 'ellipse' || drawing.kind === 'text') && drawing.region) return { ...drawing.region };
   if (!drawing.points.length) return { x: 0, y: 0, w: 0, h: 0 };
   let left = 1, top = 1, right = 0, bottom = 0;
   for (const point of drawing.points) { left = Math.min(left, point.x); top = Math.min(top, point.y); right = Math.max(right, point.x); bottom = Math.max(bottom, point.y); }
@@ -42,7 +42,7 @@ export function normalizeDrawing(drawing) {
   const originalPoints = drawing.points || [];
   const points = originalPoints.length <= MAX_PEN_POINTS ? originalPoints.map(normalizedPoint) : decimatePoints(originalPoints, 1000, 1000, 0.5, MAX_PEN_POINTS).map(normalizedPoint);
   const next = { ...drawing, points, strokeWidth: clamp(drawing.strokeWidth ?? 3, 0.25, 64), opacity: clamp(drawing.opacity ?? 1) };
-  if (drawing.kind === 'rect' || drawing.kind === 'ellipse') {
+  if (drawing.kind === 'rect' || drawing.kind === 'ellipse' || drawing.kind === 'text') {
     if (isValidRegion(drawing.region)) next.region = { ...drawing.region };
     else {
       const first = points[0] || { x: 0, y: 0 }, last = points.at(-1) || first;
@@ -75,7 +75,7 @@ export function translateDrawing(drawing, dx, dy) {
   const safeX = clamp(dx, -bounds.x, 1 - bounds.x - bounds.w);
   const safeY = clamp(dy, -bounds.y, 1 - bounds.y - bounds.h);
   return normalizeDrawing({ ...drawing,
-    ...((drawing.kind === 'rect' || drawing.kind === 'ellipse') ? { region: { ...bounds, x: bounds.x + safeX, y: bounds.y + safeY } } : {}),
+    ...((drawing.kind === 'rect' || drawing.kind === 'ellipse' || drawing.kind === 'text') ? { region: { ...bounds, x: bounds.x + safeX, y: bounds.y + safeY } } : {}),
     points: drawing.points.map((point) => ({ x: point.x + safeX, y: point.y + safeY })),
   });
 }
@@ -100,14 +100,14 @@ export function resizeDrawing(drawing, handle, point, minimum = { w: 0.003, h: 0
     x: !resizeX ? item.x : bounds.w > 1e-8 ? left + (item.x - bounds.x) / bounds.w * width : left + width / 2,
     y: !resizeY ? item.y : bounds.h > 1e-8 ? top + (item.y - bounds.y) / bounds.h * height : top + height / 2,
   }));
-  return normalizeDrawing({ ...drawing, points, ...((drawing.kind === 'rect' || drawing.kind === 'ellipse') ? { region: { x: left, y: top, w: width, h: height } } : {}) });
+  return normalizeDrawing({ ...drawing, points, ...((drawing.kind === 'rect' || drawing.kind === 'ellipse' || drawing.kind === 'text') ? { region: { x: left, y: top, w: width, h: height } } : {}) });
 }
 
 export function isDrawableSize(drawing, width, height, minimumPixels = MIN_DRAWING_SIZE_PX) {
   if (width <= 0 || height <= 0 || !drawing.points.length) return false;
   if (drawing.kind === 'pen' && drawing.points.length === 1) return true;
   if (drawing.points.length < 2) return false;
-  if (drawing.kind === 'rect' || drawing.kind === 'ellipse') {
+  if (drawing.kind === 'rect' || drawing.kind === 'ellipse' || drawing.kind === 'text') {
     const bounds = drawingBounds(drawing);
     return bounds.w * width + 1e-6 >= minimumPixels && bounds.h * height + 1e-6 >= minimumPixels;
   }
