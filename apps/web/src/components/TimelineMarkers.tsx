@@ -2,7 +2,7 @@ import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, 
 import type { CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import { Brackets, Clock3, X } from 'lucide-react';
-import type { Comment } from '../../../../packages/core/types';
+import type { Comment, ReviewMarker } from '../../../../packages/core/types';
 import { layoutTimelineMarkers } from '../../../../packages/core/timeline-markers.mjs';
 import { feedbackCategory, FEEDBACK_CATEGORY_LABELS } from '../../../../packages/core/feedback-category.mjs';
 import { time } from '../format';
@@ -35,6 +35,18 @@ export const TimelineSavedRanges = memo(function TimelineSavedRanges({ markers, 
       style={{ left: `${marker.frame / durationFrames * 100}%`, width: `${(marker.frameOut - marker.frame) / durationFrames * 100}%` }}/>
       : null)}
   </div>;
+});
+
+// Re-renders only when markers change or the playhead enters/leaves one, not on every played frame.
+export const TimelineReviewMarkers = memo(function TimelineReviewMarkers({ markers, durationFrames, activeFrame, disabled, onSeek, onRemove }: {
+  markers: ReviewMarker[]; durationFrames: number; activeFrame: number | null; disabled: boolean;
+  onSeek: (frame: number) => void; onRemove: (frame: number) => void;
+}) {
+  if (!(durationFrames > 0)) return null;
+  return <>{/* Keyed by frame (unique per version) so a pending marker becoming saved keeps its element and does not replay the drop animation. */}
+    {markers.map(marker => <button key={marker.frame} type="button" className={`vi-review-marker${marker.frame === activeFrame ? ' active' : ''}${marker.id.startsWith('pending:') ? ' pending' : ''}`}
+    style={{ left: `${marker.frame / durationFrames * 100}%` }} disabled={disabled} aria-label={`검수 마커 ${time(marker.frame)}로 이동`} title={`검수 마커 ${time(marker.frame)} · 클릭 이동 · 우클릭 삭제`}
+    onClick={() => onSeek(marker.frame)} onContextMenu={event => { event.preventDefault(); if (!disabled) onRemove(marker.frame); }}/>)}</>;
 });
 
 export const TimelineMarkers = memo(function TimelineMarkers({ markers, durationFrames, selectedId, disabled, onSelect }: Props) {

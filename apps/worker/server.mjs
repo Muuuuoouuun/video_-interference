@@ -19,7 +19,7 @@ import { prepareFilmstrip, readFilmstripCache } from './filmstrip.mjs';
 import { prepareFeedbackExport, selectFeedbackComments } from './feedback-export.mjs';
 import { preparePremiereExport } from './premiere-export.mjs';
 import { FEEDBACK_CATEGORIES } from '../../packages/core/feedback-category.mjs';
-import { IMAGE_ATTACHMENT_LIMIT } from '../../packages/core/comment-attachments.mjs';
+import { IMAGE_ATTACHMENT_LIMIT, VOICE_MAX_BYTES, VOICE_MAX_SECONDS } from '../../packages/core/comment-attachments.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const storageRoot = process.env.VI_STORAGE_ROOT || join(root, 'storage');
@@ -51,7 +51,7 @@ function publicState() {
   const capabilities = { ffmpeg: true, interpreter: interpreterMode(), interpreterLabel: interpreterMode() === 'anthropic' ? 'Claude API 연결됨 · 승인 후 실행' : '로컬 규칙 해석 · AI API 미연결', transcription: false, maxDurationSeconds: 600, fps: 30, supportedOps: ['cut', 'trim', 'speed', 'subtitle', 'overlay', 'audio', 'note'] };
   if (!data.state) return { empty: true, capabilities };
   const comments = data.state.comments.filter(comment => !comment.deletedAt), ids = new Set(comments.map(comment => comment.id));
-  return { ...data.state, comments, deletedComments: data.state.comments.filter(comment => comment.deletedAt), ops: data.state.ops.filter(op => ids.has(op.commentId)), capabilities };
+  return { ...data.state, markers: data.state.markers ?? [], comments, deletedComments: data.state.comments.filter(comment => comment.deletedAt), ops: data.state.ops.filter(op => ids.has(op.commentId)), capabilities };
 }
 
 function requireProject() {
@@ -108,7 +108,7 @@ async function importAsset(sourcePath, name) {
   const asset = { id: assetId, name, ...info, mediaUrl: `/media/${previewId}`, thumbnailUrl: `/media/${thumbId}` };
   const timelineMap = [{ sourceIn: 0, sourceOut: info.durationFrames, outputIn: 0, outputOut: info.durationFrames, speed: 1, volume: 1 }];
   const version = { id: versionId, assetId, number: 1, parentVersionId: null, durationFrames: info.durationFrames, mediaUrl: asset.mediaUrl, thumbnailUrl: asset.thumbnailUrl, opIds: [], appliedOpIds: [], timelineMap, createdAt: now(), status: 'ready', label: '원본' };
-  data.state = { project: { id: uid('project'), name: name.replace(/\.[^.]+$/, ''), activeVersionId: versionId, createdAt: now() }, asset, versions: [version], comments: [], ops: [], jobs: [], attachments: [] };
+  data.state = { project: { id: uid('project'), name: name.replace(/\.[^.]+$/, ''), activeVersionId: versionId, createdAt: now() }, asset, versions: [version], comments: [], ops: [], jobs: [], attachments: [], markers: [] };
   data.files[assetId] = { sourcePath, previewPath, path: sourcePath, mimeType: 'application/octet-stream', name };
   data.files[previewId] = { path: previewPath, mimeType: 'video/mp4', name: `${data.state.project.name}.mp4` };
   data.files[thumbId] = { path: thumbPath, mimeType: 'image/jpeg', name: 'thumbnail.jpg' };
@@ -197,6 +197,17 @@ function editComment(comment, input, workspace) {
   workspace.ops = workspace.ops.filter(op => op.commentId !== comment.id);
   comment.status = 'received'; delete comment.clarification;
   save(); return comment;
+}
+
+function createMarker(input, workspace) {
+  if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).some(key => !['versionId', 'frame'].includes(key))) throw fail('마커 형식이 유효하지 않습니다.');
+  const version = workspace.versions.find(item => item.id === input.versionId && item.status === 'ready'); if (!version) throw fail('마커를 찍을 버전을 찾지 못했습니다.', 404);
+  if (!Number.isInteger(input.frame) || input.frame < 0 || input.frame >= version.durationFrames) throw fail('마커 위치가 영상 범위를 벗어났습니다.');
+  workspace.markers ??= [];
+  // Repeated presses on one frame keep one marker.
+  const existing = workspace.markers.find(item => item.versionId === version.id && item.frame === input.frame); if (existing) return existing;
+  const marker = { id: uid('marker'), versionId: version.id, frame: input.frame, createdAt: now() };
+  workspace.markers.push(marker); save(); return marker;
 }
 
 function deleteComment(comment, workspace) {
@@ -569,11 +580,11 @@ async function handleRequest(req, res) {
       let normalizedPath;
       attaching++; cancelFilmstrips('첨부 자료 준비를 우선 실행합니다. 완료 후 시간축 썸네일을 다시 불러와 주세요.');
       try {
-        await receiveFile(req, uploadPath, role === 'voice' ? 100_000_000 : 50_000_000);
+        await receiveFile(req, uploadPath, role === 'voice' ? VOICE_MAX_BYTES : 50_000_000);
         let path = uploadPath, mimeType;
         if (role === 'voice') {
           const info = await probe(uploadPath); if (!info.streams.some(s => s.codec_type === 'audio')) throw fail('재생 가능한 음성 파일이 필요합니다.');
-          if (Number(info.format.duration) > 600) throw fail('음성 메모는 10분 이하여야 합니다.');
+          if (Number(info.format.duration) > VOICE_MAX_SECONDS) throw fail('음성 메모는 10분 이하여야 합니다.');
           path = normalizedPath = join(storageRoot, 'media', `${attachmentId}.m4a`); await run(ffmpegPath, ['-y', '-hide_banner', '-loglevel', 'error', '-i', uploadPath, '-vn', '-c:a', 'aac', '-ar', '48000', path]); mimeType = 'audio/mp4';
         } else {
           const sharp = (await import('sharp')).default;
@@ -587,6 +598,14 @@ async function handleRequest(req, res) {
         return json(res, 201, attachment);
       } catch (error) { await Promise.all([rm(uploadPath, { force: true }), ...(normalizedPath ? [rm(normalizedPath, { force: true })] : [])]); throw error; }
       finally { attaching--; }
+    }
+    if (req.method === 'POST' && path === '/api/markers') { const { input, workspace } = await projectBody(req); return json(res, 201, createMarker(input, workspace)); }
+    const markerMatch = path.match(/^\/api\/markers\/([\w-]+)$/);
+    if (req.method === 'DELETE' && markerMatch) {
+      requireProject(); const workspace = data.state;
+      const markers = workspace.markers ?? [], index = markers.findIndex(item => item.id === markerMatch[1]);
+      if (index < 0) throw fail('마커를 찾지 못했습니다.', 404);
+      const [removed] = markers.splice(index, 1); save(); return json(res, 200, removed);
     }
     if (req.method === 'POST' && path === '/api/comments') { const { input, workspace } = await projectBody(req); assertWorkspace(workspace); return json(res, 201, createComment(input)); }
     const commentMatch = path.match(/^\/api\/comments\/([\w-]+)$/);
@@ -664,7 +683,10 @@ async function handleRequest(req, res) {
       const dist = join(root, 'dist'); let target = resolve(dist, `.${path}`);
       if (!target.startsWith(`${dist}/`) && target !== dist) throw fail('파일을 찾지 못했습니다.', 404);
       try { if ((await stat(target)).isDirectory()) target = join(target, 'index.html'); await access(target); } catch { target = join(dist, 'index.html'); }
-      try { const content = await readFile(target); const mime = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png' }[extname(target)] || 'application/octet-stream'; res.writeHead(200, { 'content-type': mime, 'x-content-type-options': 'nosniff' }); return res.end(content); } catch { throw fail('개발 화면은 http://localhost:4317 에서 열어 주세요.', 404); }
+      try { const content = await readFile(target); const mime = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2' }[extname(target)] || 'application/octet-stream';
+        // Vite names /assets/ files by content hash; fonts change only with a release. The page itself always revalidates.
+        const cache = target.startsWith(join(dist, 'assets/')) ? 'public, max-age=31536000, immutable' : target.startsWith(join(dist, 'fonts/')) ? 'public, max-age=604800' : 'no-cache';
+        res.writeHead(200, { 'content-type': mime, 'cache-control': cache, 'x-content-type-options': 'nosniff' }); return res.end(content); } catch { throw fail('개발 화면은 http://localhost:4317 에서 열어 주세요.', 404); }
     }
     throw fail('경로를 찾지 못했습니다.', 404);
   } catch (error) { if (!res.headersSent && !res.destroyed) json(res, error.status || 400, { error: error.message }); }
