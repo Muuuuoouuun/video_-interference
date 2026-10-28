@@ -103,6 +103,10 @@ textarea:focus-visible, select:focus-visible,
 }
 .vi-loop-button:hover:not(:disabled) { color: var(--accent); background: var(--accent-soft); }
 .vi-loop-button.active { color: var(--accent); background: var(--accent-soft); border-color: var(--accent-border); }
+.vi-loop-button.vi-marker-button.active { color: var(--warning); background: var(--warning-surface); border-color: #eedcae; }
+.vi-loop-button.vi-marker-button.active svg { fill: currentColor; }
+.vi-marker-count { min-width: 17px; padding: 1px 5px; border-radius: 9px; color: var(--warning); background: var(--warning-surface); font-size: 10px; font-weight: 600; font-variant-numeric: tabular-nums; text-align: center; }
+.vi-marker-button.active .vi-marker-count { color: var(--surface); background: var(--warning); }
 .vi-loop-hint { color: var(--text-secondary); font-size: 11px; }
 .vi-tools-divider, .oe-toolbar-divider { background: var(--border-strong); }
 .vi-tool-group, .oe-tool-group { background: var(--surface); border-color: var(--border-strong); border-radius: 8px; }
@@ -257,6 +261,9 @@ textarea:focus-visible, select:focus-visible,
 .composer-option-summary button:hover { border-color: var(--accent); }
 .composer-voice-active { color: var(--text-secondary); background: var(--surface-soft); border-color: var(--border-strong); border-radius: 8px; font-size: 11px; }
 .composer-voice-active.is-recording { color: #b4441a; background: #fff0e9; border-color: #ffb99b; }
+.composer-rec-dot { flex-shrink: 0; width: 8px; height: 8px; border-radius: 50%; background: #e0452a; animation: composer-rec-pulse 1.2s ease-in-out infinite; }
+.composer-rec-time { font-family: var(--time-font); font-weight: 600; font-variant-numeric: tabular-nums; }
+@keyframes composer-rec-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgb(224 69 42 / 45%); } 50% { box-shadow: 0 0 0 4px rgb(224 69 42 / 0%); opacity: .55; } }
 .composer-voice-active button { color: #b4441a; background: var(--surface); border-color: #ffb99b; border-radius: 6px; font-size: 11px; }
 .drawing-count { color: var(--accent); font-size: 11px; }
 .composer-kind button, .composer-anchor-mode button {
@@ -375,3 +382,73 @@ textarea:focus-visible, select:focus-visible,
 .video-start-step-number, .video-start-steps strong svg { color: var(--accent); }
 .video-start-local { border-color: var(--border-strong); }
 .video-start-error { color: var(--danger); background: var(--danger-surface); border-color: #f0c9c5; }
+
+/* Motion: short, ease-out, and only on state changes the user caused or needs to notice.
+   Animations use the independent translate/scale properties so they never fight component transforms. */
+:root {
+  --ease-out: cubic-bezier(.22, 1, .36, 1);
+  --ease-spring: cubic-bezier(.34, 1.36, .64, 1);
+  --motion-fast: 120ms;
+  --motion-base: 180ms;
+  --motion-slow: 260ms;
+  --shadow-pop: 0 8px 28px #16181d1f, 0 1px 3px #16181d14;
+  --shadow-dialog: 0 24px 90px #16181d2e;
+}
+button, a, summary, select, input, textarea {
+  transition: color var(--motion-fast) var(--ease-out), background-color var(--motion-fast) var(--ease-out),
+    border-color var(--motion-fast) var(--ease-out), box-shadow var(--motion-base) var(--ease-out),
+    opacity var(--motion-fast) var(--ease-out), scale var(--motion-fast) var(--ease-out);
+}
+:is(.primary, .secondary, .quiet, .outline-mint, .feedback-compose-action, .vi-play-button, .vi-icon-button,
+  .vi-loop-button, .vi-compose-button, .vi-view-button, .vi-view-fit, .vi-dock-icon, .vi-tool, .oe-tool, .rail-collapse-toggle,
+  .collapsed-project-tools button, .rq-navigation button, .composer-add-attachment, .composer-kind button,
+  .composer-anchor-mode button, .request-tabs button, .vi-range-start, .vi-range-clear):active:not(:disabled) { scale: .96; }
+.version-card:active:not(:disabled) { scale: .985; }
+.version-card:hover:not(:disabled, .active) { border-color: var(--border-strong); box-shadow: 0 2px 8px #16181d0d; }
+.vi-play-button:active:not(:disabled) { scale: .92; }
+
+@keyframes vi-fade-in { from { opacity: 0; } }
+@keyframes vi-surface-in { from { opacity: 0; translate: 0 8px; scale: .985; } }
+@keyframes vi-pop-in { from { opacity: 0; translate: 0 -4px; scale: .97; } }
+@keyframes vi-toast-in { from { opacity: 0; translate: 0 12px; scale: .98; } }
+@keyframes vi-drawer-in { from { translate: 100% 0; } }
+@keyframes vi-card-in { from { opacity: 0; translate: 0 6px; } }
+@keyframes vi-reveal { from { opacity: 0; translate: 0 -3px; } }
+
+dialog[open] { animation: vi-surface-in var(--motion-slow) var(--ease-out); }
+dialog[open]::backdrop { animation: vi-fade-in var(--motion-base) var(--ease-out); }
+.attachment-preview, .workspace-dialog, .feedback-export-dialog, .layer-dialog { box-shadow: var(--shadow-dialog); }
+.workspace-more > div { transform-origin: top right; box-shadow: var(--shadow-pop); }
+.workspace-more[open] > div { animation: vi-pop-in var(--motion-base) var(--ease-out); }
+.workspace-more[open] > summary { color: var(--text); background: var(--surface-muted); }
+.oe-style-popover { transform-origin: top center; box-shadow: var(--shadow-pop); animation: vi-pop-in var(--motion-base) var(--ease-out); }
+.feedback { box-shadow: var(--shadow-pop); animation: vi-toast-in var(--motion-slow) var(--ease-spring); }
+.drawer-scrim { background: rgb(22 24 29 / 45%); animation: vi-fade-in var(--motion-base) var(--ease-out); }
+.asset-drawer { box-shadow: -12px 0 40px #16181d1f; animation: vi-drawer-in var(--motion-slow) var(--ease-out); }
+.boot { animation: vi-fade-in .3s var(--ease-out) .15s backwards; }
+
+/* Lists: new cards settle in; selection moves with a color/edge change, never a replayed animation. */
+.request-item { animation: vi-card-in var(--motion-base) var(--ease-out) backwards; transition: background-color var(--motion-base) var(--ease-out), border-color var(--motion-base) var(--ease-out), box-shadow var(--motion-base) var(--ease-out); }
+.request-item:hover:not(.selected) { border-color: var(--border-strong); box-shadow: 0 2px 10px #16181d0a; }
+.request-list, .vi-details-scroll { scroll-behavior: smooth; }
+.composer-options, .saved-context-details[open] > summary ~ *,
+.vi-loop-hint, .vi-inline-error, .composer-pending-voice, .composer-voice-active { animation: vi-reveal var(--motion-base) var(--ease-out); }
+.composer { transition: border-color var(--motion-base) var(--ease-out), box-shadow var(--motion-base) var(--ease-out), background-color var(--motion-base) var(--ease-out); }
+.composer:focus-within { box-shadow: 0 0 0 3px #2f5bff14; }
+.rq-search { transition: border-color var(--motion-fast) var(--ease-out), box-shadow var(--motion-base) var(--ease-out); }
+.vi-timeline-hover { animation: vi-fade-in var(--motion-fast) var(--ease-out); }
+.render-progress > span { transition: width var(--motion-slow) linear; }
+
+.video-start-dropzone { transition: border-color var(--motion-base) var(--ease-out), background-color var(--motion-base) var(--ease-out), box-shadow var(--motion-base) var(--ease-out); }
+.video-start-file-icon { transition: translate var(--motion-slow) var(--ease-spring), scale var(--motion-slow) var(--ease-spring); }
+.video-start-dragging .video-start-file-icon { translate: 0 -4px; scale: 1.06; }
+.video-start-intro, .video-start-dropzone, .video-start-steps { animation: vi-card-in .36s var(--ease-out) backwards; }
+.video-start-dropzone { animation-delay: 60ms; }
+.video-start-steps { animation-delay: 120ms; }
+
+@media (prefers-reduced-motion: reduce) {
+  ::backdrop { animation: none !important; }
+  .request-list, .vi-details-scroll { scroll-behavior: auto; }
+}
+.feedback > svg:first-child { flex-shrink: 0; margin-right: -8px; }
+.feedback.notice > svg:first-child { color: #11735c; }

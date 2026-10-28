@@ -21,7 +21,8 @@
 .attachment-tile figcaption strong { display: block; color: #d7e3dc; font-size: 12px; font-weight: 450; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .attachment-remove { display: inline-flex; flex-shrink: 0; align-items: center; justify-content: center; width: 32px; height: 32px; color: #abbdb3; border-radius: 5px; }
 .attachment-remove:hover:not(:disabled) { background: #4a2c2d; color: #f2b8b8; }
-.attachment-audio { grid-column: 1/-1; }
+.attachment-audio { grid-column: 1/-1; animation: attachment-enter .2s ease-out both; }
+@keyframes attachment-enter { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 .attachment-audio-icon { display: flex; gap: 7px; align-items: center; padding: 10px; color: #b1d5c2; font-size: 12px; }
 .attachment-audio audio { display: block; width: calc(100% - 16px); height: 32px; margin: 0 8px 10px; color-scheme: dark; }
 .attachment-audio figcaption { border-top: 0; padding-top: 0; }

@@ -87,7 +87,7 @@ export const RequestPanel = memo(function RequestPanel({ headerActions, keyboard
     if (!resumeCommentId || editingCommentId !== resumeCommentId || filter !== 'all' || searchQuery) return;
     const raf = requestAnimationFrame(() => {
       const textarea = document.getElementById(`comment-text-${resumeCommentId}`);
-      textarea?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      textarea?.scrollIntoView({ block: 'nearest' });
       textarea?.focus({ preventScroll: true });
       setResumeCommentId(null);
     });
