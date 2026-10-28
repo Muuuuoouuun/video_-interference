@@ -105,6 +105,8 @@ textarea:focus-visible, select:focus-visible,
 .vi-loop-button.active { color: var(--accent); background: var(--accent-soft); border-color: var(--accent-border); }
 .vi-loop-button.vi-marker-button.active { color: var(--warning); background: var(--warning-surface); border-color: #eedcae; }
 .vi-loop-button.vi-marker-button.active svg { fill: currentColor; }
+.vi-marker-count { min-width: 17px; padding: 1px 5px; border-radius: 9px; color: var(--warning); background: var(--warning-surface); font-size: 10px; font-weight: 600; font-variant-numeric: tabular-nums; text-align: center; }
+.vi-marker-button.active .vi-marker-count { color: var(--surface); background: var(--warning); }
 .vi-loop-hint { color: var(--text-secondary); font-size: 11px; }
 .vi-tools-divider, .oe-toolbar-divider { background: var(--border-strong); }
 .vi-tool-group, .oe-tool-group { background: var(--surface); border-color: var(--border-strong); border-radius: 8px; }

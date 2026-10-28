@@ -3,7 +3,7 @@ import type { Ref } from 'react';
 import { parseTimecodeInput } from '../../../../packages/core/timecode-input.mjs';
 import { time } from '../format';
 
-export interface TimecodeSeekHandle { open: () => void }
+export interface TimecodeSeekHandle { open: () => void; show: (frame: number) => void }
 export function TimecodeSeek({ frame, durationFrames, locked, onReadFrame, onSeek, controlRef }: {
   frame: number; durationFrames: number; locked: boolean; onReadFrame: () => number;
   onSeek: (frame: number) => void; controlRef?: Ref<TimecodeSeekHandle>;
@@ -13,10 +13,13 @@ export function TimecodeSeek({ frame, durationFrames, locked, onReadFrame, onSee
   const errorId = useId();
   const input = useRef<HTMLInputElement>(null);
   const button = useRef<HTMLButtonElement>(null);
+  const shown = useRef<HTMLElement>(null);
   const skipBlur = useRef(false);
   const restoreFocus = useRef(false);
   const open = () => { if (!locked) { skipBlur.current = false; setError(''); setDraft(time(onReadFrame())); } };
-  useImperativeHandle(controlRef, () => ({ open }));
+  // Playback writes the same text node React owns; React's next differing value still replaces it.
+  const show = (next: number) => { const node = shown.current?.firstChild; const text = time(next); if (node && node.nodeValue !== text) node.nodeValue = text; };
+  useImperativeHandle(controlRef, () => ({ open, show }));
   useLayoutEffect(() => {
     if (draft !== null) { input.current?.focus(); input.current?.select(); }
     else if (restoreFocus.current) { restoreFocus.current = false; button.current?.focus({ preventScroll: true }); }
@@ -29,7 +32,7 @@ export function TimecodeSeek({ frame, durationFrames, locked, onReadFrame, onSee
     if (next !== null && !locked) onSeek(Math.min(next, durationFrames - 1));
   }
   return <div className="vi-timecode vi-seek-timecode">
-    {draft === null ? <button ref={button} className="vi-current-time" disabled={locked} onClick={open} aria-label={`시간으로 이동 · 현재 ${time(frame)}`} title="클릭하여 시간 입력 (G) · 분:초 또는 초"><strong>{time(frame)}</strong></button>
+    {draft === null ? <button ref={button} className="vi-current-time" disabled={locked} onClick={open} aria-label={`시간으로 이동 · 현재 ${time(frame)}`} title="클릭하여 시간 입력 (G) · 분:초 또는 초"><strong ref={shown}>{time(frame)}</strong></button>
       : <input ref={input} aria-label="재생 위치 시간 입력" aria-invalid={Boolean(error)} aria-describedby={error ? errorId : undefined} title="분:초 또는 초 · Enter 이동 · Esc 취소" value={draft} disabled={locked} maxLength={24} autoComplete="off" spellCheck={false}
         onChange={event => { setDraft(event.target.value); setError(''); }} onBlur={() => commit(false)}
         onKeyDown={event => {

@@ -285,12 +285,14 @@ export function VideoWorkspace({ version, versions, asset, comments, attachments
     if (!video || !playing) return;
     let disposed = false, handle: number | null = null;
     const nativeFrames = typeof video.requestVideoFrameCallback === 'function';
-    // App state follows timeupdate (~4/s); the playhead alone follows every presented frame without a React render.
+    // App state follows timeupdate (~4/s); the playhead and timecode follow every presented frame without a React render.
     const tick = () => {
       handle = null;
       if (disposed || !playback.playingRequested || video.paused) return;
       samplePlayback();
-      if (playheadRef.current) playheadRef.current.style.left = `${playback.frameAt(video.currentTime) / durationFrames * 100}%`;
+      const shown = playback.frameAt(video.currentTime);
+      if (playheadRef.current) playheadRef.current.style.left = `${shown / durationFrames * 100}%`;
+      timecodeRef.current?.show(shown);
       schedule();
     };
     const schedule = () => {
@@ -589,7 +591,7 @@ export function VideoWorkspace({ version, versions, asset, comments, attachments
         </div>
         <div className="vi-player-tools">
           {hasActiveRange ? <button className={`vi-loop-button${loopRange && hasActiveRange ? ' active' : ''}`} disabled={!hasActiveRange || editingLocked || mediaError} aria-pressed={loopRange && hasActiveRange} onClick={() => setLoopRange(enabled => !enabled)} title={hasActiveRange ? '보기용 IN–OUT 반복. 재생 버튼을 누르면 구간 밖에서는 IN부터 시작하며, 멈춘 상태에서는 자동 재생하지 않습니다.' : '구간을 지정하면 반복 재생할 수 있습니다.'}><Repeat2 size={15} />구간 반복</button> : null}
-          {onToggleMarker ? <button className={`vi-loop-button vi-marker-button${markerHere ? ' active' : ''}`} disabled={editingLocked || mediaError} aria-pressed={markerHere} onClick={toggleMarker} title="검수 마커 찍기 / 지우기 (B) · 이전 / 다음 마커 ( , / . )"><Bookmark size={15} />{markerHere ? '마커 지우기' : '마커'}</button> : null}
+          {onToggleMarker ? <button className={`vi-loop-button vi-marker-button${markerHere ? ' active' : ''}`} disabled={editingLocked || mediaError} aria-pressed={markerHere} onClick={toggleMarker} title={`검수 마커 ${versionMarkers.length}개 · 찍기 / 지우기 (B) · 이전 / 다음 마커 ( , / . )`}><Bookmark size={15} />{markerHere ? '마커 지우기' : '마커'}{versionMarkers.length ? <small className="vi-marker-count">{versionMarkers.length}</small> : null}</button> : null}
           {markerLoop ? <button className={`vi-loop-button${markerLoopActive ? ' active' : ''}`} disabled={editingLocked || mediaError} aria-pressed={markerLoopActive} onClick={loopMarkers} title={`${timecode(markerLoop.in)}–${timecode(markerLoop.out)} 보기용 반복 · 다음 마커가 없으면 영상 끝까지. 선택 구간도 이 범위로 바뀝니다.`}><Repeat2 size={15} />다음 마커까지 반복</button> : null}
           <label className="vi-playback-speed"><span>보기</span><select aria-label="보기 배속 — 출력 영상에는 적용되지 않음" title="미리보기 재생 배속 ([ / ]). 출력 영상에는 적용되지 않습니다." value={playbackRate} onChange={event => changePlaybackRate(Number(event.target.value))}>{PLAYBACK_RATES.map(rate => <option key={rate} value={rate}>{rate}×</option>)}</select></label>
           {!compactTimeline ? <button className="vi-dock-icon vi-pan-tool" disabled={preview.rect.zoom <= 1} aria-pressed={preview.hand && preview.rect.zoom > 1} onClick={preview.toggleHand} aria-label="확대한 영상 이동" title="이동 도구 (H) · 마우스 가운데 버튼으로도 이동"><Hand size={16}/></button> : null}
