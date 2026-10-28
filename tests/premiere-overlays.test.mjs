@@ -130,7 +130,8 @@ test('native FFmpeg confirms transparent placement and exact IN/OUT appearance o
   const directory=await mkdtemp(join(tmpdir(),'vi-overlay-render-'));
   try {
     const {bundle,timelinePngs}=await buildPremiereBundle(state(),'v1');
-    const source=join(directory,'source.mkv');
+    // NUT keeps exact 1/30 s timestamps; Matroska rounds to milliseconds, which makes IN/OUT boundaries version-dependent.
+    const source=join(directory,'source.nut');
     execFileSync(ffmpegPath,['-y','-v','error','-f','lavfi','-i','color=c=black:s=320x180:r=30:d=3','-c:v','ffv1',source]);
     const before=digest(await readFile(source));
     const args=['-v','error','-i',source], filters=[];

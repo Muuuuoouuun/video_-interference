@@ -6,9 +6,10 @@ import { join, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import sharp from 'sharp';
 import { ffmpegPath, ingest, mapToSource, renderVideo, run } from '../apps/worker/engine.mjs';
+import { planCanonicalFrameRuns } from '../apps/worker/canonical-frames.mjs';
 
 const hash = async path => createHash('sha256').update(await readFile(path)).digest('hex');
-const codeFiles = ['apps/worker/filmstrip.mjs', 'apps/worker/canonical-frames.mjs', 'apps/worker/engine.mjs'];
+const codeFiles = ['apps/worker/filmstrip.mjs', 'apps/worker/canonical-frames.mjs', 'apps/worker/parallel.mjs', 'apps/worker/engine.mjs'];
 
 /** Measure actual FFmpeg starts independently of the filmstrip module's diagnostics. */
 export async function measureFilmstrip({ versionId, videoPath, durationFrames, directory }) {
@@ -28,7 +29,7 @@ export async function measureFilmstrip({ versionId, videoPath, durationFrames, d
   assert.equal(code, 0, stderr);
   const [cold, warm] = JSON.parse(stdout);
   assert.equal(cold.result.cacheHit, false, 'First extraction must use a fresh cache directory.');
-  assert.equal(cold.nativeCalls.length, 1, 'A cold strip decodes the video in exactly one FFmpeg process.');
+  assert.equal(cold.nativeCalls.length, planCanonicalFrameRuns(cold.result.frames).length, 'A cold strip starts one short seek+decode FFmpeg process per planned run.');
   assert.equal(warm.result.cacheHit, true);
   assert.equal(warm.nativeCalls.length, 0, 'A warm strip starts no FFmpeg process.');
   assert.equal(cold.result.cacheKey, warm.result.cacheKey);

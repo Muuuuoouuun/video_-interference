@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { renderFeedbackJsonl, renderFeedbackVtt, entryDigest } from '../apps/worker/handoff.mjs';
-import { parseSceneCuts, shotsFromCuts } from '../apps/worker/overview.mjs';
+import { shotsFromCuts } from '../apps/worker/overview.mjs';
+import { parseSceneScores } from '../apps/worker/scene-scores.mjs';
 
 const entry = (number, changes = {}) => ({
   id: `feedback-${number}`, number, kind: 'request', sceneDescription: { source: 'user', text: '' }, feedback: { original: `요청 ${number}`, supplements: [] },
@@ -44,10 +45,12 @@ test('entry digests change with what a model saw, not with presentation-only fie
   assert.notEqual(entryDigest(base), entryDigest(entry(1, { feedback: { original: '요청 1', supplements: [{ id: 's', text: '추가' }] } })));
 });
 
-test('scene cut parsing converts framemd5 timestamps to canonical frames and closes contiguous shots', () => {
-  const framemd5 = '#tb 0: 1/15360\n#stream#, dts, pts, duration, size, hash\n0, 15360, 15360, 512, 100, abc\n0, 46080, 46080, 512, 100, def\n0, 0, 0, 512, 100, start\n';
-  assert.deepEqual(parseSceneCuts(framemd5, 120), [30, 90]);
+test('scene cut parsing converts per-frame scores to canonical frames and closes contiguous shots', () => {
+  const frame = (index, score) => `frame:${index}    pts:${index}       pts_time:${index / 30}\nlavfi.scene_score=${score.toFixed(6)}`;
+  const scores = [frame(0, 0), frame(1, 0.01), frame(30, 0.82), frame(31, 0.3), frame(90, 0.300001), frame(119, 0.9), frame(120, 0.95)].join('\n') + '\n';
+  assert.deepEqual(parseSceneScores(scores, 120), [30, 90, 119], 'strictly above 0.3; frame 0 and frames at or past the end never start a shot');
+  assert.deepEqual(parseSceneScores('', 120), [], 'a run without scores means one shot');
   assert.deepEqual(shotsFromCuts([30, 90], 120), [{ index: 1, frameIn: 0, frameOut: 30 }, { index: 2, frameIn: 30, frameOut: 90 }, { index: 3, frameIn: 90, frameOut: 120 }]);
   assert.deepEqual(shotsFromCuts([], 120), [{ index: 1, frameIn: 0, frameOut: 120 }]);
-  assert.throws(() => parseSceneCuts('no header', 120));
+  assert.throws(() => parseSceneScores('not a score file', 120));
 });

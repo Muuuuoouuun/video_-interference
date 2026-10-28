@@ -4,7 +4,7 @@ import { createReadStream, createWriteStream } from 'node:fs';
 import { access, mkdir, copyFile, stat, rm, readFile, writeFile } from 'node:fs/promises';
 import { pipeline } from 'node:stream/promises';
 import { Transform } from 'node:stream';
-import { dirname, join, resolve, extname, basename } from 'node:path';
+import { dirname, join, resolve, extname, basename, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { readJsonBody as bodyJson } from './request-body.mjs';
@@ -17,10 +17,12 @@ import { prepareRequestContextBundle } from './context-bundle.mjs';
 import { isVisualOp, visualLayerId } from '../../packages/core/layer-snapshot.mjs';
 import { prepareFilmstrip, readFilmstripCache } from './filmstrip.mjs';
 import { prepareFeedbackExport, selectFeedbackComments } from './feedback-export.mjs';
+import { storeSceneCuts } from './overview.mjs';
 import { preparePremiereExport } from './premiere-export.mjs';
 import { FEEDBACK_CATEGORIES } from '../../packages/core/feedback-category.mjs';
 import { IMAGE_ATTACHMENT_LIMIT, VOICE_MAX_BYTES, VOICE_MAX_SECONDS } from '../../packages/core/comment-attachments.mjs';
 import { transcribeVoice, transcriptionConfig } from './transcription.mjs';
+import { writeZip } from './zip.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const storageRoot = process.env.VI_STORAGE_ROOT || join(root, 'storage');
@@ -45,6 +47,9 @@ const feedbackExportTasks = new Map();
 let premiereExportInFlight = false;
 const transcriptionControllers = new Map();
 let filmstripTail = Promise.resolve();
+/** What the start screen shows while a video is received and normalized; null when no import runs. */
+let importStatus = null;
+const overviewRoot = join(storageRoot, 'overviews');
 
 await mkdir(join(storageRoot, 'media'), { recursive: true });
 await mkdir(join(storageRoot, 'jobs'), { recursive: true });
@@ -86,36 +91,46 @@ function safeName(req) {
   return basename(name).replace(/[\r\n]/g, '').slice(0, 180) || 'untitled';
 }
 
-async function receiveFile(req, path, maxBytes) {
+async function receiveFile(req, path, maxBytes, onBytes) {
   if (Number(req.headers['content-length'] || 0) > maxBytes) throw fail('파일 크기 제한을 초과했습니다.', 413);
   let total = 0;
-  const limiter = new Transform({ transform(chunk, encoding, callback) { total += chunk.length; callback(total > maxBytes ? fail('파일 크기 제한을 초과했습니다.', 413) : null, chunk); } });
+  const limiter = new Transform({ transform(chunk, encoding, callback) { total += chunk.length; onBytes?.(total); callback(total > maxBytes ? fail('파일 크기 제한을 초과했습니다.', 413) : null, chunk); } });
   try { await pipeline(req, limiter, createWriteStream(path, { flags: 'wx' })); if (!total) throw fail('빈 파일은 열 수 없습니다.'); }
   catch (error) { await rm(path, { force: true }); throw error; }
 }
 
-async function importAsset(sourcePath, name) {
+async function importAsset(sourcePath, name, { signal, onProgress } = {}) {
   const assetId = uid('asset'), versionId = uid('version');
   const previewId = `${assetId}_preview`, thumbId = `${assetId}_thumb`;
   const previewPath = join(storageRoot, 'media', `${previewId}.mp4`), thumbPath = join(storageRoot, 'media', `${thumbId}.jpg`);
-  let info;
-  try { info = await ingest(sourcePath, previewPath, thumbPath); }
-  catch (error) { await Promise.all([rm(previewPath, { force: true }), rm(thumbPath, { force: true })]); throw error; }
-  if (shuttingDown) throw fail('앱을 종료하는 중입니다.', 503);
-  if (data.state) {
-    const archiveRoot = join(storageRoot, 'archives'); await mkdir(archiveRoot, { recursive: true });
-    await writeFile(join(archiveRoot, `${data.state.project.id}-${Date.now()}.json`), JSON.stringify({ state: data.state, files: data.files, snapshots: data.snapshots }, null, 2));
+  const scoresPath = join(storageRoot, 'jobs', `${previewId}.scene-scores.txt`);
+  let info, published = false;
+  try {
+    // The normalization decode also measures scene cuts, so the first export needs no extra full decode.
+    info = await ingest(sourcePath, previewPath, thumbPath, { sceneScoresPath: scoresPath, onProgress, signal });
+    try { await storeSceneCuts({ videoPath: previewPath, durationFrames: info.durationFrames, scores: await readFile(scoresPath, 'utf8'), directory: overviewRoot, source: 'import-normalization' }); }
+    catch (error) { if (signal?.aborted) throw error; process.stderr.write(`장면 전환 미리 계산을 건너뜁니다. 내보낼 때 다시 계산합니다: ${error.message}\n`); }
+    if (shuttingDown) throw fail('앱을 종료하는 중입니다.', 503);
+    signal?.throwIfAborted();
+    if (data.state) {
+      const archiveRoot = join(storageRoot, 'archives'); await mkdir(archiveRoot, { recursive: true });
+      await writeFile(join(archiveRoot, `${data.state.project.id}-${Date.now()}.json`), JSON.stringify({ state: data.state, files: data.files, snapshots: data.snapshots }, null, 2));
+    }
+    if (shuttingDown) throw fail('앱을 종료하는 중입니다.', 503);
+    signal?.throwIfAborted();
+    const asset = { id: assetId, name, ...info, mediaUrl: `/media/${previewId}`, thumbnailUrl: `/media/${thumbId}` };
+    const timelineMap = [{ sourceIn: 0, sourceOut: info.durationFrames, outputIn: 0, outputOut: info.durationFrames, speed: 1, volume: 1 }];
+    const version = { id: versionId, assetId, number: 1, parentVersionId: null, durationFrames: info.durationFrames, mediaUrl: asset.mediaUrl, thumbnailUrl: asset.thumbnailUrl, opIds: [], appliedOpIds: [], timelineMap, createdAt: now(), status: 'ready', label: '원본' };
+    data.state = { project: { id: uid('project'), name: name.replace(/\.[^.]+$/, ''), activeVersionId: versionId, createdAt: now() }, asset, versions: [version], comments: [], ops: [], jobs: [], attachments: [], markers: [] };
+    data.files[assetId] = { sourcePath, previewPath, path: sourcePath, mimeType: 'application/octet-stream', name };
+    data.files[previewId] = { path: previewPath, mimeType: 'video/mp4', name: `${data.state.project.name}.mp4` };
+    data.files[thumbId] = { path: thumbPath, mimeType: 'image/jpeg', name: 'thumbnail.jpg' };
+    data.snapshots[versionId] = [];
+    save(); published = true; return { asset, version };
+  } finally {
+    await rm(scoresPath, { force: true });
+    if (!published) await Promise.all([rm(previewPath, { force: true }), rm(thumbPath, { force: true })]);
   }
-  if (shuttingDown) throw fail('앱을 종료하는 중입니다.', 503);
-  const asset = { id: assetId, name, ...info, mediaUrl: `/media/${previewId}`, thumbnailUrl: `/media/${thumbId}` };
-  const timelineMap = [{ sourceIn: 0, sourceOut: info.durationFrames, outputIn: 0, outputOut: info.durationFrames, speed: 1, volume: 1 }];
-  const version = { id: versionId, assetId, number: 1, parentVersionId: null, durationFrames: info.durationFrames, mediaUrl: asset.mediaUrl, thumbnailUrl: asset.thumbnailUrl, opIds: [], appliedOpIds: [], timelineMap, createdAt: now(), status: 'ready', label: '원본' };
-  data.state = { project: { id: uid('project'), name: name.replace(/\.[^.]+$/, ''), activeVersionId: versionId, createdAt: now() }, asset, versions: [version], comments: [], ops: [], jobs: [], attachments: [], markers: [] };
-  data.files[assetId] = { sourcePath, previewPath, path: sourcePath, mimeType: 'application/octet-stream', name };
-  data.files[previewId] = { path: previewPath, mimeType: 'video/mp4', name: `${data.state.project.name}.mp4` };
-  data.files[thumbId] = { path: thumbPath, mimeType: 'image/jpeg', name: 'thumbnail.jpg' };
-  data.snapshots[versionId] = [];
-  save(); return { asset, version };
 }
 
 function createComment(input) {
@@ -348,16 +363,14 @@ async function prepareCommentContext(comment, workspace) {
     for (const file of bundle.manifest.files.filter(item => ['annotation', 'sheet'].includes(item.role))) records[uid('context_file')] = { path: join(bundle.directory, file.path), mimeType: file.mimeType, name: file.path };
     const manifestId = uid('context_manifest'); records[manifestId] = { path: bundle.manifestPath, mimeType: 'application/json; charset=utf-8', name: 'manifest.json' };
     await writeFile(bundle.manifestPath, JSON.stringify(bundle.manifest, null, 2));
-    let archiveUrl;
-    try {
-      await access('/usr/bin/zip'); const archivePath = join(bundle.directory, 'context.zip');
-      await run('/usr/bin/zip', ['-j', '-q', archivePath, ...Object.values(records).map(record => record.path)], { signal: controller.signal });
-      const archiveId = uid('context_archive'); records[archiveId] = { path: archivePath, mimeType: 'application/zip', name: `${comment.id}-context.zip` }; archiveUrl = `/media/${archiveId}`;
-    } catch (error) { if (error.code !== 'ENOENT') throw error; }
+    // Every bundle file sits in the bundle folder, so entry names stay flat as before.
+    const archivePath = join(bundle.directory, 'context.zip');
+    await writeZip(bundle.directory, archivePath, [...new Set(Object.values(records).map(record => relative(bundle.directory, record.path)))], { signal: controller.signal });
+    const archiveId = uid('context_archive'); records[archiveId] = { path: archivePath, mimeType: 'application/zip', name: `${comment.id}-context.zip` }; const archiveUrl = `/media/${archiveId}`;
     controller.signal.throwIfAborted(); assertWorkspace(workspace);
     registeredIds = Object.keys(records); Object.assign(data.files, records); save();
     process.stdout.write(`Local context bundle prepared for ${comment.id}: ${bundle.manifest.sceneFrames.length} scenes; external transmission: none\n`);
-    return { manifestUrl: `/media/${manifestId}`, ...(archiveUrl ? { archiveUrl } : {}), sceneCount: bundle.manifest.sceneFrames.length, drawingSceneCount: bundle.manifest.drawingContexts.length, attachmentCount: bundle.manifest.attachments.length };
+    return { manifestUrl: `/media/${manifestId}`, archiveUrl, sceneCount: bundle.manifest.sceneFrames.length, drawingSceneCount: bundle.manifest.drawingContexts.length, attachmentCount: bundle.manifest.attachments.length };
   } catch (error) { for (const id of registeredIds) delete data.files[id]; if (bundle) await rm(bundle.directory, { recursive: true, force: true }); throw error; }
   finally { interpreting.delete(comment.id); interpretationControllers.delete(comment.id); }
 }
@@ -401,7 +414,7 @@ async function exportFeedback(input, workspace) {
   const controller = new AbortController();
   const promise = (async () => {
     try {
-      const result = await prepareFeedbackExport({ state: requestSnapshot, targetVersionId: targetVersion.id, commentIds: comments.map(comment => comment.id), files: fileSnapshot, snapshots: snapshotSnapshot, directory: join(storageRoot, 'feedback-exports'), overviewDirectory: join(storageRoot, 'overviews'), signal: controller.signal });
+      const result = await prepareFeedbackExport({ state: requestSnapshot, targetVersionId: targetVersion.id, commentIds: comments.map(comment => comment.id), files: fileSnapshot, snapshots: snapshotSnapshot, directory: join(storageRoot, 'feedback-exports'), overviewDirectory: overviewRoot, signal: controller.signal });
       controller.signal.throwIfAborted(); assertWorkspace(workspace);
       const records = {}, prefix = `feedback_${result.manifest.cacheKey}`;
       records[`${prefix}_manifest`] = { path: result.manifestPath, mimeType: 'application/json; charset=utf-8', name: 'manifest.json' };
@@ -490,10 +503,12 @@ async function seedSampleComments() {
 async function executeJob(job, version, snapshot, selected, controller) {
   rendering = true; job.status = 'running'; save();
   let lastProgress = 0;
-  const outputPath = join(storageRoot, 'media', `${version.id}.mp4`), thumbnailPath = join(storageRoot, 'media', `${version.id}_thumb.jpg`);
+  const outputPath = join(storageRoot, 'media', `${version.id}.mp4`), thumbnailPath = join(storageRoot, 'media', `${version.id}_thumb.jpg`), scoresPath = join(storageRoot, 'jobs', `${version.id}.scene-scores.txt`);
   try {
-    const result = await renderVideo({ asset: data.state.asset, sourcePath: data.files[data.state.asset.id].sourcePath, ops: snapshot, outputPath, thumbnailPath, workingDirectory: join(storageRoot, 'jobs', job.id), files: data.files, signal: controller.signal, onProgress: progress => { if (progress - lastProgress >= 0.025) { lastProgress = progress; job.progress = Math.round(progress * 100); save(); } } });
+    const result = await renderVideo({ asset: data.state.asset, sourcePath: data.files[data.state.asset.id].sourcePath, ops: snapshot, outputPath, thumbnailPath, workingDirectory: join(storageRoot, 'jobs', job.id), files: data.files, sceneScoresPath: scoresPath, signal: controller.signal, onProgress: progress => { if (progress - lastProgress >= 0.025) { lastProgress = progress; job.progress = Math.round(progress * 100); save(); } } });
     controller.signal.throwIfAborted();
+    try { await storeSceneCuts({ videoPath: outputPath, durationFrames: result.durationFrames, scores: await readFile(scoresPath, 'utf8'), directory: overviewRoot, source: 'render' }); }
+    catch (error) { process.stderr.write(`렌더 장면 전환 미리 계산을 건너뜁니다. 내보낼 때 다시 계산합니다: ${error.message}\n`); }
     Object.assign(version, { timelineMap: result.timelineMap, durationFrames: result.durationFrames, status: 'ready' });
     data.files[version.id] = { path: outputPath, mimeType: 'video/mp4', name: `${data.state.project.name}_v${version.number}.mp4` };
     data.files[`${version.id}_thumb`] = { path: thumbnailPath, mimeType: 'image/jpeg', name: 'thumbnail.jpg' };
@@ -507,7 +522,7 @@ async function executeJob(job, version, snapshot, selected, controller) {
     if (cleanupError) job.error += ` 임시 출력 파일 정리 실패: ${cleanupError}`;
     job.completedAt = now(); version.status = 'failed';
   }
-  finally { jobControllers.delete(job.id); rendering = false; save(); }
+  finally { jobControllers.delete(job.id); rendering = false; save(); await rm(scoresPath, { force: true }).catch(() => {}); }
 }
 
 function createRender(input) {
@@ -570,6 +585,7 @@ async function handleRequest(req, res) {
     const url = new URL(req.url, `http://127.0.0.1:${port}`), path = url.pathname;
     if (req.method === 'GET' && path === '/api/state') return json(res, 200, publicState());
     if (req.method === 'GET' && path === '/api/health') return json(res, 200, { ok: true, fps: 30, interpreter: interpreterMode() });
+    if (req.method === 'GET' && path === '/api/import-status') return json(res, 200, importStatus ? { active: true, ...importStatus } : { active: false });
     if (req.method === 'PATCH' && path === '/api/project') {
       const { input, workspace } = await projectBody(req);
       assertWorkspace(workspace);
@@ -592,9 +608,20 @@ async function handleRequest(req, res) {
       const name = safeName(req); if (!/\.(mp4|mov|m4v|webm|mkv|avi)$/i.test(name)) throw fail('MP4, MOV, M4V, WebM, MKV, AVI 영상을 지원합니다.');
       const sourcePath = join(storageRoot, 'media', `${uid('source')}${extname(name).toLowerCase()}`);
       importing = true; cancelFilmstrips('새 영상 열기를 우선 실행합니다. 현재 영상에서 썸네일을 다시 불러와 주세요.');
-      try { await receiveFile(req, sourcePath, 2_000_000_000); return json(res, 201, await importAsset(sourcePath, name)); }
-      catch (error) { await rm(sourcePath, { force: true }); throw error; }
-      finally { importing = false; }
+      // Closing the page or pressing cancel drops the connection; stop the conversion instead of replacing the project later.
+      const controller = new AbortController(), totalBytes = Number(req.headers['content-length']) || null;
+      const disconnected = () => { if (!res.writableFinished) controller.abort(fail('영상 가져오기를 취소했습니다. 기존 프로젝트는 그대로입니다.', 499)); };
+      res.once('close', disconnected);
+      importStatus = { stage: 'receiving', name, receivedBytes: 0, totalBytes, progress: 0, startedAt: now() };
+      try {
+        await receiveFile(req, sourcePath, 2_000_000_000, bytes => { importStatus.receivedBytes = bytes; if (totalBytes) importStatus.progress = Math.min(1, bytes / totalBytes); });
+        controller.signal.throwIfAborted();
+        Object.assign(importStatus, { stage: 'converting', progress: 0 });
+        const imported = await importAsset(sourcePath, name, { signal: controller.signal, onProgress: progress => { importStatus.progress = progress; } });
+        return json(res, 201, imported);
+      }
+      catch (error) { await rm(sourcePath, { force: true }); throw controller.signal.aborted && !shuttingDown ? controller.signal.reason : error; }
+      finally { importing = false; importStatus = null; res.off('close', disconnected); }
     }
     if (req.method === 'POST' && path === '/api/attachments') {
       requireProject();

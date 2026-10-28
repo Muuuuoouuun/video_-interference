@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, readFile, writeFile, rename, rm, copyFile, stat } from 'node:fs/promises';
 import { join, extname } from 'node:path';
-import { ffmpegPath, run } from './engine.mjs';
-import { planCanonicalFrameDecode } from './canonical-frames.mjs';
+import { extractCanonicalFrames } from './canonical-frames.mjs';
+import { mediaConcurrency } from './parallel.mjs';
 import { validateDrawings } from './drawings.mjs';
 import { HANDOFF_SCHEMA_VERSION, FRAME_CONVENTION, CONTEXT_READING_GUIDE, inventoryFile, renderAnnotatedStill, composeSceneSheet, buildHandoffEntry } from './handoff.mjs';
 import { groupDrawings } from '../../packages/core/drawing-anchors.mjs';
@@ -34,12 +34,12 @@ export async function prepareRequestContextBundle(comment, { versionPath, durati
   if (comment.attachmentIds.length > 10) throw new Error('한 요청의 첨부 자료는 최대 10개여야 합니다. 자료는 생략하지 않았습니다.');
   await mkdir(directory, { recursive: true }); const bundleDirectory = await mkdtemp(join(directory, 'request-context-')); let completed = false;
   try {
-    const decode = planCanonicalFrameDecode(planned.sceneFrames.map(item => item.frame));
-    await run(ffmpegPath, ['-y', '-hide_banner', '-loglevel', 'error', ...decode.inputArgs, '-i', versionPath, '-map', '0:v:0', '-an', '-vf', `select=${decode.select},scale=w='min(640,iw)':h='min(640,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2`, '-fps_mode', 'vfr', '-frames:v', String(planned.sceneFrames.length), '-q:v', '3', '-start_number', '0', join(bundleDirectory, '%02d.jpg')], { signal });
+    const extracted = await extractCanonicalFrames({ videoPath: versionPath, frames: planned.sceneFrames.map(item => item.frame), directory: bundleDirectory, filter: "scale=w='min(640,iw)':h='min(640,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2", outputArgs: ['-q:v', '3'], threads: 0, concurrency: mediaConcurrency(), timeout: 900_000, signal });
+    if (extracted.paths.some(path => !path)) throw new Error('작성 버전 길이와 장면 스틸 개수가 맞지 않습니다. 자료는 생략하지 않았습니다.');
     const sharp = (await import('sharp')).default, sceneFrames = [];
     for (let index = 0; index < planned.sceneFrames.length; index++) {
       signal?.throwIfAborted(); const item = planned.sceneFrames[index], file = `scene-${item.frame}.jpg`;
-      await rename(join(bundleDirectory, `${String(index).padStart(2, '0')}.jpg`), join(bundleDirectory, file));
+      await rename(extracted.paths[index], join(bundleDirectory, file));
       const bytes = await readFile(join(bundleDirectory, file)), metadata = await sharp(bytes).metadata();
       sceneFrames.push({ ...item, file, mimeType: 'image/jpeg', width: metadata.width, height: metadata.height, bytes: bytes.length });
     }

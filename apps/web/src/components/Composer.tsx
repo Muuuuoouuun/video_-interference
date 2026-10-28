@@ -105,13 +105,23 @@ export function Composer({ range, currentFrame, drawingContextFrame, drawings, b
     imageUploadInFlight.current = true;
     setUploadingImage(true);
     try {
-      for (const file of images) {
-        try {
-          const attachment = await upload<Attachment>('/api/attachments', file, file.name || '참고 이미지.png', fileRole);
-          if (!mounted.current) return;
-          setAttachments(items => [...items, attachment]);
-        } catch (error) { if (mounted.current) onError(`${file.name}: ${(error as Error).message}`); }
-      }
+      // Three uploads at a time; finished images still appear in the order they were chosen.
+      const results: (Attachment | null | undefined)[] = new Array(images.length);
+      let next = 0, shown = 0;
+      const flush = () => {
+        const ready: Attachment[] = [];
+        while (shown < images.length && results[shown] !== undefined) { const item = results[shown++]; if (item) ready.push(item); }
+        if (ready.length && mounted.current) setAttachments(items => [...items, ...ready]);
+      };
+      const worker = async () => {
+        while (next < images.length) {
+          const index = next++, file = images[index];
+          try { results[index] = await upload<Attachment>('/api/attachments', file, file.name || '참고 이미지.png', fileRole); }
+          catch (error) { results[index] = null; if (mounted.current) onError(`${file.name}: ${(error as Error).message}`); }
+          flush();
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(3, images.length) }, worker));
     } finally { imageUploadInFlight.current = false; if (mounted.current) setUploadingImage(false); }
   }
   async function toggleRecording() {

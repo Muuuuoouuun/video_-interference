@@ -697,7 +697,8 @@ await test('feedback handoff exports authored scenes, annotations and portable a
   assert.equal(deleted.feedback.supplements.length, 0, 'in-flight export stays on its initial immutable request snapshot');
   assert.equal(deleted.sceneDescription.text, feedback.sceneDescription); assert.ok(deleted.scenes.some(scene => scene.frame === 45 && scene.annotatedFile));
   assert.equal(manifest.stats.attachmentCount, 2, 'shared reference file is copied once'); assert.equal(manifest.diagnostics.stillRuns, 1);
-  assert.equal(manifest.diagnostics.overviewRuns, 1, 'the target-version overview is one extra cached decode outside the still extraction'); await validateHandoffManifest(manifest);
+  assert.equal(manifest.diagnostics.shotSource, 'render', 'scene cuts measured while rendering the target version are reused');
+  assert.equal(manifest.diagnostics.overviewRuns, 1, 'the overview only seeks its grid frames; no second full decode of the video'); await validateHandoffManifest(manifest);
   assert.equal(manifest.overview.versionId, target.id); assert.equal(manifest.overview.shots.list.at(-1).frameOut, target.durationFrames);
   const jsonlResponse = await fetch(`${base}${first.value.jsonlUrl}`), vttResponse = await fetch(`${base}${first.value.vttUrl}`);
   assert.match(jsonlResponse.headers.get('content-type'), /ndjson/); assert.match(vttResponse.headers.get('content-type'), /text\/vtt/);
@@ -710,9 +711,10 @@ await test('feedback handoff exports authored scenes, annotations and portable a
   const audio = manifest.files.find(file => file.mimeType === 'audio/mp4'); assert.ok(audio);
   const voiceInfo = JSON.parse(await run(ffprobePath, ['-v', 'error', '-show_streams', '-of', 'json', join(unpacked, audio.path)])); assert.ok(voiceInfo.streams.every(stream => stream.codec_type === 'audio'), 'a video uploaded as a voice memo exports audio only');
   for (const file of manifest.files) assert.equal(createHash('sha256').update(await readFile(join(unpacked, file.path))).digest('hex'), file.sha256);
-  const newer = await request('/api/feedback-exports', 'POST', exportBody); assert.equal(newer.status, 200); assert.notEqual(newer.value.archiveUrl, first.value.archiveUrl); assert.equal(await countCalls(), 2);
-  const newerManifest = await (await fetch(`${base}${newer.value.manifestUrl}`)).json(); assert.equal(newerManifest.feedback.find(entry => entry.id === feedback.id).feedback.supplements[0].text, '자료 준비 이후 추가한 설명');
-  assert.deepEqual((await request('/api/feedback-exports', 'POST', exportBody)).value, newer.value); assert.equal(await countCalls(), 2, 'unchanged snapshot reuses the complete ZIP');
+  const newer = await request('/api/feedback-exports', 'POST', exportBody); assert.equal(newer.status, 200); assert.notEqual(newer.value.archiveUrl, first.value.archiveUrl); assert.equal(await countCalls(), 1, 'a text-only change re-exports from cached stills without decoding again');
+  const newerManifest = await (await fetch(`${base}${newer.value.manifestUrl}`)).json(); assert.equal(newerManifest.diagnostics.stillRuns, 0); assert.equal(newerManifest.diagnostics.stillCacheHits, newerManifest.stats.sceneCount);
+  assert.deepEqual(newerManifest.files.filter(file => file.role === 'scene').map(file => file.sha256), manifest.files.filter(file => file.role === 'scene').map(file => file.sha256), 'cached stills are byte-identical to the first extraction'); assert.equal(newerManifest.feedback.find(entry => entry.id === feedback.id).feedback.supplements[0].text, '자료 준비 이후 추가한 설명');
+  assert.deepEqual((await request('/api/feedback-exports', 'POST', exportBody)).value, newer.value); assert.equal(await countCalls(), 1, 'unchanged snapshot reuses the complete ZIP');
   const all = await request('/api/feedback-exports', 'POST', { versionId: target.id }); assert.equal(all.status, 200); assert.equal(all.value.commentCount, (await request('/api/state')).value.comments.length, 'default includes all feedback and notes');
   assert.equal(createHash('sha256').update(await readFile(source)).digest('hex'), sourceHash);
 });

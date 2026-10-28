@@ -1,10 +1,13 @@
 import { useRef, useState } from 'react';
 import { Clock3, FileText, Film, FolderOpen, LoaderCircle, ShieldCheck } from 'lucide-react';
+import { ImportProgress, type ImportProgressState } from './ImportProgress';
 import './VideoStart.css';
 
 interface Props {
   busy: boolean;
   error: string;
+  progress?: ImportProgressState | null;
+  onCancel?: () => void;
   onImport: (file: File) => Promise<void>;
   onError: (message: string) => void;
 }
@@ -12,7 +15,7 @@ interface Props {
 const videoExtension = /\.(mp4|mov|webm|mkv|m4v)$/i;
 
 /** First-run surface only; the parent owns project creation and media validation. */
-export function VideoStart({ busy, error, onImport, onError }: Props) {
+export function VideoStart({ busy, error, progress = null, onCancel, onImport, onError }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const importingRef = useRef(false);
   const dragDepth = useRef(0);
@@ -46,9 +49,9 @@ export function VideoStart({ busy, error, onImport, onError }: Props) {
         onDragLeave={event => { if (event.dataTransfer.types.includes('Files')) { dragDepth.current = Math.max(0, dragDepth.current - 1); if (!dragDepth.current) setDragging(false); } }}
         onDrop={event => { if (!event.dataTransfer.types.includes('Files')) return; event.preventDefault(); dragDepth.current = 0; setDragging(false); void importFiles(Array.from(event.dataTransfer.files)); }}>
         <div className="video-start-file-icon">{unavailable ? <LoaderCircle size={30} className="spinning"/> : <Film size={30}/>}</div>
-        <div className="video-start-drop-copy"><h2>{unavailable ? '영상을 준비하고 있습니다' : dragging ? '여기에 영상을 놓으세요' : '첫 영상을 열어볼까요'}</h2><p role={unavailable ? 'status' : undefined}>{unavailable ? '영상 정보와 미리보기를 준비하는 동안 잠시 기다려 주세요.' : 'PC의 영상 파일 하나를 끌어 놓거나 선택하세요.'}</p><small>지원 범위 · 최대 10분 / 2GB · 파일 형식은 가져올 때 확인합니다.</small></div>
+        {progress ? <ImportProgress className="video-start-progress" state={progress} onCancel={progress.stage === 'finishing' ? undefined : onCancel}/> : <div className="video-start-drop-copy"><h2>{unavailable ? '영상을 준비하고 있습니다' : dragging ? '여기에 영상을 놓으세요' : '첫 영상을 열어볼까요'}</h2><p role={unavailable ? 'status' : undefined}>{unavailable ? '영상 정보와 미리보기를 준비하는 동안 잠시 기다려 주세요.' : 'PC의 영상 파일 하나를 끌어 놓거나 선택하세요.'}</p><small>지원 범위 · 최대 10분 / 2GB · 파일 형식은 가져올 때 확인합니다.</small></div>}
         <input ref={inputRef} hidden type="file" accept="video/*" disabled={unavailable} onChange={event => { const files = Array.from(event.target.files ?? []); event.target.value = ''; if (files.length) void importFiles(files); }}/>
-        <button type="button" className="primary video-start-open" disabled={unavailable} onClick={() => inputRef.current?.click()}><FolderOpen size={18}/>{unavailable ? '준비 중' : '영상 열기'}</button>
+        {progress ? null : <button type="button" className="primary video-start-open" disabled={unavailable} onClick={() => inputRef.current?.click()}><FolderOpen size={18}/>{unavailable ? '준비 중' : '영상 열기'}</button>}
       </section>
       {error ? <div className="video-start-error" role="alert">{error}</div> : null}
       <ol className="video-start-steps">

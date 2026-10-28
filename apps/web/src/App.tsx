@@ -5,7 +5,8 @@ import { confirmedMutation } from '../../../packages/core/confirmed-mutation.mjs
 import { projectComment } from '../../../packages/core/comment-projection.mjs';
 import { createProjectedRequestDraft, planPlayerCompose } from '../../../packages/core/request-draft.mjs';
 import { drawingFrame, groupDrawings, projectDrawings } from '../../../packages/core/drawing-anchors.mjs';
-import { api, upload } from './api';
+import { api, isAbortError, upload } from './api';
+import { ImportProgress, type ImportProgressState } from './components/ImportProgress';
 import { time } from './format';
 import { FeedbackExportDialog } from './components/FeedbackExportDialog';
 import { PremiereExportDialog, type PremiereExportResult } from './components/PremiereExportDialog';
@@ -52,6 +53,8 @@ export function App() {
   const [layerDraftOpen, setLayerDraftOpen] = useState(false);
   const [feedbackRevealToken, setFeedbackRevealToken] = useState(0);
   const [loadingFile, setLoadingFile] = useState(false);
+  const [importProgress, setImportProgress] = useState<ImportProgressState | null>(null);
+  const importAbort = useRef<AbortController | null>(null);
   const [selectedId, setSelectedId] = useState<string|null>(null);
   const [selectedRangeIndex, setSelectedRangeIndex] = useState(0);
   const [currentFrame, setCurrentFrame] = useState(0);
@@ -405,11 +408,29 @@ export function App() {
   }
   async function importFile(file: File) {
     if (draftPending || supplementDraft || layerDraftOpen) { setError('작성 중인 요청과 그래픽 수정을 먼저 저장하거나 취소하세요.'); return; }
+    if (importAbort.current) return;
+    const controller = new AbortController(); importAbort.current = controller;
     setLoadingFile(true); setError('');
-    try { await upload('/api/assets', file, file.name); setData(null); setEmpty(false); initialized.current = false; const imported = await load(); if ('empty' in imported) return; setCurrentFrame(0); setRange({ in: 0, out: 1 }); setSelectedId(null); setDrawings([]); resetDrawingHistory(); setPreviewOpId(null); setCompare(false); setFeedbackAnchorMode('point'); setExportResult(null); setNotice('영상을 가져왔습니다. 구간을 선택하고 요청을 남겨보세요.'); } catch (e) { setError((e as Error).message); } finally { setLoadingFile(false); }
+    setImportProgress({ name: file.name, stage: 'receiving', progress: 0, sentBytes: 0, totalBytes: file.size, stageStartedAt: Date.now() });
+    // Upload bytes come from the browser; once the file is on disk the worker reports conversion progress.
+    const poll = window.setInterval(() => {
+      void api<{ active: boolean; stage?: 'receiving' | 'converting'; progress?: number }>('/api/import-status').then(status => {
+        if (controller.signal.aborted || !status.active || status.stage !== 'converting') return;
+        setImportProgress(current => !current || current.stage === 'finishing' ? current : current.stage === 'converting' ? { ...current, progress: status.progress ?? 0 } : { ...current, stage: 'converting', progress: status.progress ?? 0, stageStartedAt: Date.now() });
+      }).catch(() => {});
+    }, 800);
+    try {
+      await upload('/api/assets', file, file.name, undefined, { signal: controller.signal, onProgress: (sentBytes, totalBytes) => setImportProgress(current => current?.stage === 'receiving' ? { ...current, sentBytes, totalBytes, progress: totalBytes ? sentBytes / totalBytes : 0 } : current) });
+      setImportProgress(current => current ? { ...current, stage: 'finishing', progress: 1 } : current);
+      setData(null); setEmpty(false); initialized.current = false; const imported = await load(); if ('empty' in imported) return; setCurrentFrame(0); setRange({ in: 0, out: 1 }); setSelectedId(null); setDrawings([]); resetDrawingHistory(); setPreviewOpId(null); setCompare(false); setFeedbackAnchorMode('point'); setExportResult(null); setNotice('영상을 가져왔습니다. 구간을 선택하고 요청을 남겨보세요.');
+    } catch (e) {
+      if (isAbortError(e)) setNotice('영상 가져오기를 취소했습니다. 기존 작업은 그대로입니다.');
+      else setError((e as Error).message);
+    } finally { window.clearInterval(poll); importAbort.current = null; setImportProgress(null); setLoadingFile(false); }
   }
+  const cancelImport = useCallback(() => importAbort.current?.abort(), []);
   const previous = data?.versions.find(v => v.id === version?.parentVersionId) ?? data?.versions.find(v => v.id !== version?.id && v.status === 'ready');
-  if (empty) return <VideoStart busy={loadingFile} error={error} onImport={importFile} onError={setError}/>;
+  if (empty) return <VideoStart busy={loadingFile} error={error} progress={importProgress} onCancel={cancelImport} onImport={importFile} onError={setError}/>;
   if (!data || !version) return <div className="boot"><span className="wordmark">INTERFERENCE</span><LoaderCircle className="spinning"/><p>{error || '로컬 영상을 준비하고 있습니다.'}</p>{error ? <button className="primary" onClick={() => void load().catch(e => setError((e as Error).message))}>다시 연결</button> : null}</div>;
   return <div className="app-shell">
     <header className="app-header">
@@ -442,6 +463,7 @@ export function App() {
     <FeedbackExportDialog open={exportOpen} busy={busy && exportInFlight.current} result={exportResult} error={exportError} onClose={() => { if (!exportInFlight.current) setExportOpen(false); }} onRetry={() => void exportFeedback()}/>
     <PremiereExportDialog open={premiereOpen} busy={busy && premiereInFlight.current} result={premiereResult} error={premiereError} onClose={() => { if (!premiereInFlight.current) setPremiereOpen(false); }} onRetry={() => void exportPremiere()}/>
     {error ? <div className="feedback error" role="alert"><CircleAlert size={17} aria-hidden="true"/><span>{error}</span><button className="quiet" onClick={() => void load().then(() => setError('')).catch(e => setError((e as Error).message))}>다시 연결</button><button onClick={() => setError('')} aria-label="오류 메시지 닫기"><X size={16}/></button></div> : null}
+    {importProgress ? <ImportProgress className="app-import-progress" state={importProgress} onCancel={importProgress.stage === 'finishing' ? undefined : cancelImport}/> : null}
     {notice ? <div className="feedback notice" role="status"><CircleCheck size={17} aria-hidden="true"/><span>{notice}</span>{undoDeleteId && notice === '피드백을 휴지통으로 옮겼습니다.' ? <button className="feedback-undo" disabled={busy} onClick={() => void onRestoreComment(undoDeleteId)}><RotateCcw size={14}/>되돌리기</button> : null}<button onClick={() => setNotice('')} aria-label="알림 닫기"><X size={16}/></button></div> : null}
     {showAssets ? <div className="drawer-scrim" onClick={() => setShowAssets(false)}><section className="asset-drawer" role="dialog" aria-modal="true" aria-label="에셋 보관함" onClick={e => e.stopPropagation()}><div className="panel-heading"><h2>에셋 보관함</h2><button className="quiet" onClick={() => setShowAssets(false)} aria-label="에셋 보관함 닫기"><X size={18}/></button></div><p className="subtle">참고 자료와 영상에 넣을 에셋을 구분합니다.</p>{data.attachments.length === 0 ? <p>요청 작성 영역에서 이미지를 첨부하거나 음성을 녹음하세요.</p> : data.attachments.map(a => <a className="asset-row" href={a.mediaUrl} target="_blank" rel="noreferrer" key={a.id}>{a.mimeType.startsWith('image/') ? <img src={a.mediaUrl} alt=""/> : a.mimeType.startsWith('audio/') ? <FileAudio size={24}/> : <FileIcon/>}<div><strong>{a.name}</strong><small>{a.role === 'reference' ? '스타일 참고' : a.role === 'insert' ? '영상에 삽입' : editingMode ? '편집 지시 음성' : '음성 피드백'}</small></div></a>)}</section></div> : null}
   </div>;

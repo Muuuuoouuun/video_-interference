@@ -1,8 +1,10 @@
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, writeFile, copyFile, stat, rename, rm, readdir } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile, copyFile, stat, rename, rm } from 'node:fs/promises';
+import { constants } from 'node:fs';
 import { join } from 'node:path';
-import { ffmpegPath, run } from './engine.mjs';
-import { planCanonicalFrameDecode } from './canonical-frames.mjs';
+import { extractCanonicalFrames } from './canonical-frames.mjs';
+import { mapLimit, mediaConcurrency } from './parallel.mjs';
+import { writeZip } from './zip.mjs';
 import { planRequestContextFrames } from './context-bundle.mjs';
 import { prepareVersionOverview } from './overview.mjs';
 import { HANDOFF_SCHEMA_VERSION, FRAME_CONVENTION, READING_GUIDE, clock, rangesText, inventoryFile, renderAnnotatedStill, composeSceneSheet, buildHandoffEntry, entryDigest, renderFeedbackJsonl, renderFeedbackVtt } from './handoff.mjs';
@@ -17,6 +19,7 @@ const abort = signal => signal?.throwIfAborted();
 const quote = text => (String(text).split('\n').map(line => `> ${line}`).join('\n'));
 const EXPORT_FILE = /^(?:scenes\/version-\d+\/frame-\d+\.jpg|annotations\/feedback-\d+\/frame-\d+\.jpg|sheets\/feedback-\d+\.jpg|overview\/grid\.jpg|attachments\/asset-\d+\.(?:png|m4a))$/;
 const SHOT_TABLE_LIMIT = 40;
+const STILL_FILTER = "scale=w='min(960,iw)':h='min(960,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1";
 
 export function selectFeedbackComments(state, targetVersionId, commentIds) {
   if (!state?.project || !Array.isArray(state.versions) || !Array.isArray(state.comments)) throw fail('피드백을 내보낼 프로젝트를 찾지 못했습니다.', 409);
@@ -168,47 +171,79 @@ export async function prepareFeedbackExport({ state, targetVersionId, commentIds
     }
   } catch (error) { abort(signal); if (['EACCES', 'EPERM'].includes(error.code)) throw error; }
   await mkdir(directory, { recursive: true }); const work = await mkdtemp(join(directory, '.feedback-export-')), started = performance.now();
-  let completed = false, stillRuns = 0;
+  let completed = false;
   try {
-    const assets = [], sceneFiles = new Map(), attachmentFiles = new Map();
-    const inventory = async (path, mimeType, role) => { assets.push(await inventoryFile(work, path, mimeType, role)); };
-    let versionIndex = 0;
-    for (const [versionId, group] of sourceGroups) {
-      abort(signal); const folder = `scenes/version-${String(++versionIndex).padStart(3, '0')}`; await mkdir(join(work, folder), { recursive: true });
-      const frames = [...group.frames].sort((a, b) => a - b), decode = planCanonicalFrameDecode(frames);
-      await run(ffmpegPath, ['-y', '-hide_banner', '-loglevel', 'error', '-threads', '1', ...decode.inputArgs, '-i', group.videoPath, '-map', '0:v:0', '-an', '-sn', '-dn', '-vf', `select=${decode.select},scale=w='min(960,iw)':h='min(960,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1`, '-fps_mode', 'vfr', '-frames:v', String(frames.length), '-q:v', '2', '-start_number', '0', '-threads', '1', join(work, folder, '%06d.jpg')], { signal, timeout: 120_000 }); stillRuns++;
-      const actual = (await readdir(join(work, folder))).filter(name => /^\d{6}\.jpg$/.test(name)); if (actual.length !== frames.length) throw fail('작성 버전 길이와 스틸 개수가 맞지 않습니다. 자료는 생략하지 않았습니다.', 409);
-      for (let index = 0; index < frames.length; index++) {
-        const file = `${folder}/frame-${String(frames[index]).padStart(6, '0')}.jpg`;
-        await rename(join(work, folder, `${String(index).padStart(6, '0')}.jpg`), join(work, file)); await inventory(file, 'image/jpeg', 'scene'); sceneFiles.set(`${versionId}:${frames[index]}`, file);
+    const workers = mediaConcurrency(), sceneFiles = new Map(), attachmentFiles = new Map(), timings = {};
+    const groups = [...sourceGroups].map(([versionId, group], index) => ({ versionId, group, folder: `scenes/version-${String(index + 1).padStart(3, '0')}` }));
+    for (const { folder } of groups) await mkdir(join(work, folder), { recursive: true });
+    const extractStills = async ({ versionId, group, folder }, taskSignal) => {
+      const frames = [...group.frames].sort((a, b) => a - b), name = frame => `frame-${String(frame).padStart(6, '0')}.jpg`;
+      // Stills depend only on the version file and frame, so a re-export decodes just the frames it has not seen.
+      const cacheDirectory = join(directory, '.stills', digest({ format: 'feedback-still-v1', filter: STILL_FILTER, quality: 2, video: await fileIdentity(group.videoPath) }));
+      await mkdir(cacheDirectory, { recursive: true });
+      const cached = new Set((await mapLimit(frames, 16, async frame => { try { return (await stat(join(cacheDirectory, name(frame)))).size > 0 ? frame : null; } catch { return null; } }, taskSignal)).filter(frame => frame !== null));
+      const missing = frames.filter(frame => !cached.has(frame));
+      let runs = 0;
+      if (missing.length) {
+        const extracted = await extractCanonicalFrames({ videoPath: group.videoPath, frames: missing, directory: join(work, folder), filter: STILL_FILTER, outputArgs: ['-q:v', '2'], threads: 1, concurrency: workers, timeout: 120_000, signal: taskSignal });
+        if (extracted.paths.some(path => !path)) throw fail('작성 버전 길이와 스틸 개수가 맞지 않습니다. 자료는 생략하지 않았습니다.', 409);
+        runs = extracted.runs;
+        await mapLimit(missing, workers * 2, async (frame, index) => {
+          const target = join(work, folder, name(frame)); await rename(extracted.paths[index], target);
+          const partial = join(cacheDirectory, `.${name(frame)}.${process.pid}.partial`);
+          try { await copyFile(target, partial, constants.COPYFILE_FICLONE); await rename(partial, join(cacheDirectory, name(frame))); } catch { await rm(partial, { force: true }); }
+        }, taskSignal);
       }
-    }
+      await mapLimit([...cached], workers * 2, async frame => copyFile(join(cacheDirectory, name(frame)), join(work, folder, name(frame)), constants.COPYFILE_FICLONE), taskSignal);
+      const files = frames.map(frame => `${folder}/${name(frame)}`);
+      frames.forEach((frame, index) => sceneFiles.set(`${versionId}:${frame}`, files[index]));
+      return { files, runs, cacheHits: cached.size };
+    };
+    // Scene stills and the target-version overview are independent native work, so they run side by side.
+    const stage = performance.now();
+    const native = await mapLimit([...groups.map(group => signal => extractStills(group, signal)), signal => prepareVersionOverview({ versionId: targetVersion.id, videoPath: targetVideoPath, durationFrames: targetVersion.durationFrames, directory: overviewDirectory, signal })], groups.length + 1, (task, index, taskSignal) => task(taskSignal), signal);
+    const stills = native.slice(0, -1), overviewResult = native.at(-1), stillRuns = stills.reduce((sum, item) => sum + item.runs, 0), stillCacheHits = stills.reduce((sum, item) => sum + item.cacheHits, 0);
+    timings.nativeMs = Math.round(performance.now() - stage);
     abort(signal);
-    const overviewResult = await prepareVersionOverview({ versionId: targetVersion.id, videoPath: targetVideoPath, durationFrames: targetVersion.durationFrames, directory: overviewDirectory, signal });
-    await mkdir(join(work, 'overview'), { recursive: true }); await copyFile(overviewResult.imagePath, join(work, 'overview/grid.jpg')); await inventory('overview/grid.jpg', 'image/jpeg', 'overview');
-    let attachmentIndex = 0;
-    for (const [id, record] of attachmentRecords) {
-      abort(signal); const voice = record.attachment.role === 'voice', file = `attachments/asset-${String(++attachmentIndex).padStart(4, '0')}${voice ? '.m4a' : '.png'}`;
-      await mkdir(join(work, 'attachments'), { recursive: true }); await copyFile(record.path, join(work, file)); await inventory(file, voice ? 'audio/mp4' : 'image/png', 'attachment');
+    await mkdir(join(work, 'overview'), { recursive: true }); await copyFile(overviewResult.imagePath, join(work, 'overview/grid.jpg'));
+    const attachmentJobs = [...attachmentRecords].map(([id, record], index) => ({ id, record, voice: record.attachment.role === 'voice', file: `attachments/asset-${String(index + 1).padStart(4, '0')}${record.attachment.role === 'voice' ? '.m4a' : '.png'}` }));
+    if (attachmentJobs.length) await mkdir(join(work, 'attachments'), { recursive: true });
+    await mapLimit(attachmentJobs, workers, async ({ record, file }, index, taskSignal) => { taskSignal.throwIfAborted(); await copyFile(record.path, join(work, file)); }, signal);
+    for (const { id, record, voice, file } of attachmentJobs) {
       const transcript = voice && record.attachment.transcript?.text ? { transcript: structuredClone(record.attachment.transcript) } : {};
       attachmentFiles.set(id, { id, name: record.attachment.name, role: record.attachment.role, mimeType: voice ? 'audio/mp4' : 'image/png', file, ...(voice ? { automaticTranscription: Boolean(transcript.transcript), source: 'normalized-audio-only', ...transcript } : {}) });
     }
-    const feedback = [], observedIds = new Set(observationSets.flatMap(set => set.items.map(item => item.id)));
-    for (let index = 0; index < plans.length; index++) {
-      abort(signal); const { comment, authored, plan, ids } = plans[index], scenes = [], cells = [], number = index + 1;
+    // Annotated stills and one-sheet summaries only read their own entry's files; numbering stays in reading order.
+    const imageStage = performance.now();
+    await mkdir(join(work, 'sheets'), { recursive: true });
+    const rendered = await mapLimit(plans, workers, async ({ comment, authored, plan }, index, taskSignal) => {
+      taskSignal.throwIfAborted();
+      const number = index + 1, scenes = [], cells = [], files = [];
       const drawingsByFrame = new Map(groupDrawings(plan.drawings, comment.contextFrame ?? comment.frameIn).map(group => [group.frame, group.drawings]));
       for (const scene of plan.sceneFrames) {
         const file = sceneFiles.get(`${authored.id}:${scene.frame}`), drawings = drawingsByFrame.get(scene.frame); let annotatedFile;
         if (drawings?.length) {
-          annotatedFile = `annotations/feedback-${String(number).padStart(4, '0')}/frame-${String(scene.frame).padStart(6, '0')}.jpg`;
-          await mkdir(join(work, `annotations/feedback-${String(number).padStart(4, '0')}`), { recursive: true });
-          await renderAnnotatedStill(join(work, file), drawings, join(work, annotatedFile)); await inventory(annotatedFile, 'image/jpeg', 'annotation');
+          const folder = `annotations/feedback-${String(number).padStart(4, '0')}`;
+          annotatedFile = `${folder}/frame-${String(scene.frame).padStart(6, '0')}.jpg`;
+          await mkdir(join(work, folder), { recursive: true });
+          await renderAnnotatedStill(join(work, file), drawings, join(work, annotatedFile)); files.push({ path: annotatedFile, role: 'annotation' });
         }
         scenes.push({ ...scene, file, ...(annotatedFile ? { annotatedFile } : {}) });
         cells.push({ frame: scene.frame, roles: scene.roles, path: join(work, file), ...(annotatedFile ? { annotatedPath: join(work, annotatedFile) } : {}) });
       }
-      const sheetFile = `sheets/feedback-${String(number).padStart(4, '0')}.jpg`; await mkdir(join(work, 'sheets'), { recursive: true });
-      const sheet = { file: sheetFile, ...await composeSceneSheet(cells, comment.contextFrame ?? comment.frameIn, join(work, sheetFile)) }; await inventory(sheetFile, 'image/jpeg', 'sheet');
+      taskSignal.throwIfAborted();
+      const sheetFile = `sheets/feedback-${String(number).padStart(4, '0')}.jpg`;
+      const sheet = { file: sheetFile, ...await composeSceneSheet(cells, comment.contextFrame ?? comment.frameIn, join(work, sheetFile)) }; files.push({ path: sheetFile, role: 'sheet' });
+      return { scenes, sheet, files };
+    }, signal);
+    timings.imagesMs = Math.round(performance.now() - imageStage);
+    abort(signal);
+    // Inventory order matches reading order: scenes, overview, attachments, then each entry's annotations and sheet.
+    const listed = [...stills.flatMap(item => item.files.map(path => ({ path, mimeType: 'image/jpeg', role: 'scene' }))), { path: 'overview/grid.jpg', mimeType: 'image/jpeg', role: 'overview' }, ...attachmentJobs.map(job => ({ path: job.file, mimeType: job.voice ? 'audio/mp4' : 'image/png', role: 'attachment' })), ...rendered.flatMap(item => item.files.map(file => ({ ...file, mimeType: 'image/jpeg' })))];
+    const assets = await mapLimit(listed, workers * 2, async ({ path, mimeType, role }) => inventoryFile(work, path, mimeType, role), signal);
+    const feedback = [], observedIds = new Set(observationSets.flatMap(set => set.items.map(item => item.id)));
+    for (let index = 0; index < plans.length; index++) {
+      const { comment, authored, plan, ids } = plans[index], { scenes, sheet } = rendered[index], number = index + 1;
       let layerMetadata = {};
       if (comment.layerChange) {
         const target = (layerSnapshots[comment.versionId] || []).find(op => isVisualOp(op) && visualLayerId(op) === comment.layerChange.targetLayerId && op.id === comment.layerChange.targetOpId);
@@ -222,28 +257,15 @@ export async function prepareFeedbackExport({ state, targetVersionId, commentIds
     const unmatchedObservations = [...observedIds].filter(id => !feedback.some(entry => entry.id === id)).length;
     const overview = { versionId: targetVersion.id, versionNumber: targetVersion.number, durationFrames: targetVersion.durationFrames, grid: { file: 'overview/grid.jpg', ...overviewResult.grid }, shots: overviewResult.shots };
     const stats = { commentCount: feedback.length, sceneCount: sceneFiles.size, annotationCount: assets.filter(file => file.role === 'annotation').length, sheetCount: feedback.length, attachmentCount: attachmentFiles.size, authoredVersionCount: sourceGroups.size, shotCount: overview.shots.list.length, transcriptCount: [...attachmentFiles.values()].filter(item => item.transcript).length, observationCount: feedback.reduce((sum, entry) => sum + (entry.observations?.length ?? 0), 0), unmatchedObservationCount: unmatchedObservations };
-    const manifest = { schemaVersion: HANDOFF_SCHEMA_VERSION, kind: 'video-feedback-handoff', cacheKey, createdAt: new Date().toISOString(), localOnly: true, modelCalled: false, networkUsed: false, sourceVideoIncluded: false, renderedVideoIncluded: false, automaticTranscription: false, modelObservationsIncluded: stats.observationCount > 0, frameConvention: FRAME_CONVENTION, guide: READING_GUIDE, project: { id: snapshot.project.id, name: snapshot.project.name }, targetVersion: { id: targetVersion.id, number: targetVersion.number, label: targetVersion.label, durationFrames: targetVersion.durationFrames, fps: 30 }, overview, feedback, files: assets, stats, diagnostics: { ffmpegRuns: stillRuns + overviewResult.diagnostics.ffmpegRuns, stillRuns, overviewRuns: overviewResult.diagnostics.ffmpegRuns, overviewCacheHit: overviewResult.cacheHit } };
+    const manifest = { schemaVersion: HANDOFF_SCHEMA_VERSION, kind: 'video-feedback-handoff', cacheKey, createdAt: new Date().toISOString(), localOnly: true, modelCalled: false, networkUsed: false, sourceVideoIncluded: false, renderedVideoIncluded: false, automaticTranscription: false, modelObservationsIncluded: stats.observationCount > 0, frameConvention: FRAME_CONVENTION, guide: READING_GUIDE, project: { id: snapshot.project.id, name: snapshot.project.name }, targetVersion: { id: targetVersion.id, number: targetVersion.number, label: targetVersion.label, durationFrames: targetVersion.durationFrames, fps: 30 }, overview, feedback, files: assets, stats, diagnostics: { ffmpegRuns: stillRuns + overviewResult.diagnostics.ffmpegRuns, stillRuns, stillCacheHits, overviewRuns: overviewResult.diagnostics.ffmpegRuns, overviewCacheHit: overviewResult.cacheHit, ...(overviewResult.shots.source ? { shotSource: overviewResult.shots.source } : {}) } };
     await writeFile(join(work, 'manifest.json'), JSON.stringify(manifest, null, 2)); await writeFile(join(work, 'feedback.md'), renderFeedbackMarkdown(manifest));
     await writeFile(join(work, 'feedback.jsonl'), renderFeedbackJsonl(manifest)); await writeFile(join(work, 'feedback.vtt'), renderFeedbackVtt(manifest)); abort(signal);
     // Every entry is generated locally with portable relative paths; no source/edited video is added.
-    const zipList = ['feedback.md', 'feedback.jsonl', 'feedback.vtt', 'manifest.json', ...assets.map(asset => asset.path)].join('\n') + '\n';
-    // zip's -@ input is supplied through a tiny subprocess, without a shell or interpolated command.
-    await zipFiles(work, join(work, 'feedback.zip'), zipList, signal);
+    const zipStage = performance.now();
+    await writeZip(work, join(work, 'feedback.zip'), ['feedback.md', 'feedback.jsonl', 'feedback.vtt', 'manifest.json', ...assets.map(asset => asset.path)], { signal });
+    timings.zipMs = Math.round(performance.now() - zipStage);
     abort(signal);
     await rm(finalDirectory, { recursive: true, force: true }); await rename(work, finalDirectory); completed = true;
-    return { directory: finalDirectory, manifestPath, markdownPath, jsonlPath, vttPath, archivePath, manifest, commentCount: feedback.length, sceneCount: sceneFiles.size, cacheHit: false, diagnostics: { ...manifest.diagnostics, elapsedMs: Math.round(performance.now() - started) } };
+    return { directory: finalDirectory, manifestPath, markdownPath, jsonlPath, vttPath, archivePath, manifest, commentCount: feedback.length, sceneCount: sceneFiles.size, cacheHit: false, diagnostics: { ...manifest.diagnostics, ...timings, elapsedMs: Math.round(performance.now() - started) } };
   } finally { if (!completed) await rm(work, { recursive: true, force: true }); }
-}
-
-export async function zipFiles(directory, path, list, signal) {
-  // The platform utility accepts explicit generated relative entry names; cwd keeps the archive portable.
-  const { spawn } = await import('node:child_process');
-  await new Promise((resolve, reject) => {
-    abort(signal); const child = spawn('/usr/bin/zip', ['-q', path, '-@'], { cwd: directory, stdio: ['pipe', 'ignore', 'pipe'] }); let stderr = '', stopped = false, timer;
-    const stop = () => { stopped = true; child.kill('SIGTERM'); timer = setTimeout(() => child.kill('SIGKILL'), 1000); timer.unref(); };
-    signal?.addEventListener('abort', stop, { once: true }); child.stderr.on('data', chunk => { stderr = (stderr + chunk).slice(-2000); }); child.stdin.on('error', () => {});
-    child.once('error', error => { signal?.removeEventListener('abort', stop); clearTimeout(timer); reject(error); });
-    child.once('close', code => { signal?.removeEventListener('abort', stop); clearTimeout(timer); stopped ? reject(signal.reason) : code === 0 ? resolve() : reject(new Error(`피드백 ZIP을 만들지 못했습니다: ${stderr}`)); });
-    child.stdin.end(list);
-  });
 }

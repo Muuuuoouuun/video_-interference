@@ -1,12 +1,24 @@
 import { spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
+import { accessSync, constants } from 'node:fs';
 import { mkdir, writeFile, access, stat, rename } from 'node:fs/promises';
-import { join, dirname } from 'node:path';
+import { join, dirname, delimiter } from 'node:path';
 import { drawingsSvg, assertStaticDrawingFrames } from './drawings.mjs';
+import { sceneScoreFilter } from './scene-scores.mjs';
 
 export const FPS = 30;
-export const ffmpegPath = process.env.FFMPEG_PATH || '/opt/homebrew/bin/ffmpeg';
-export const ffprobePath = process.env.FFPROBE_PATH || '/opt/homebrew/bin/ffprobe';
+
+/** An explicit env path wins; otherwise Apple Silicon Homebrew, Intel Homebrew, then PATH. */
+export function resolveMediaBinary(name, explicit, { searchPath = process.env.PATH ?? '', candidates = [`/opt/homebrew/bin/${name}`, `/usr/local/bin/${name}`] } = {}) {
+  if (explicit) return explicit;
+  const executable = path => { try { accessSync(path, constants.X_OK); return true; } catch { return false; } };
+  return [...candidates, ...searchPath.split(delimiter).filter(Boolean).map(folder => join(folder, name))].find(executable) ?? name;
+}
+export const ffmpegPath = resolveMediaBinary('ffmpeg', process.env.FFMPEG_PATH);
+export const ffprobePath = resolveMediaBinary('ffprobe', process.env.FFPROBE_PATH);
+const X264_PRESETS = ['ultrafast', 'superfast', 'veryfast', 'faster', 'fast', 'medium', 'slow', 'slower', 'veryslow'];
+/** Review proxy only (renders keep their own settings). superfast imports ~1.4x faster than veryfast at equal or better SSIM, with larger files. */
+export const proxyPreset = X264_PRESETS.includes(process.env.VI_PROXY_PRESET) ? process.env.VI_PROXY_PRESET : 'superfast';
 
 const canceledError = () => Object.assign(new Error('렌더를 취소했습니다.'), { name: 'AbortError' });
 const checkCancellation = signal => { if (signal?.aborted) throw canceledError(); };
@@ -74,8 +86,12 @@ export function audioOffsetFromInfo(info) {
 
 const alignedAudio = offset => `asetpts=PTS-STARTPTS+(${offset})/TB,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,aresample=async=1:first_pts=0`;
 
-export async function ingest(sourcePath, previewPath, thumbnailPath) {
-  const info = await probe(sourcePath);
+/**
+ * Normalizes a source into the 30fps review proxy. With `sceneScoresPath`, the same decode also writes per-frame
+ * scene scores so the version overview never needs a second full decode of this proxy.
+ */
+export async function ingest(sourcePath, previewPath, thumbnailPath, { sceneScoresPath, onProgress, signal } = {}) {
+  const info = await probe(sourcePath, { signal });
   const video = info.streams.find(stream => stream.codec_type === 'video' && !stream.disposition?.attached_pic);
   if (!video || !video.width || !video.height) throw new Error('재생 가능한 영상 파일이 필요합니다.');
   const duration = Number(video.duration || info.format.duration);
@@ -84,14 +100,16 @@ export async function ingest(sourcePath, previewPath, thumbnailPath) {
   if (video.width > 8192 || video.height > 8192) throw new Error('8K 이하 영상만 지원합니다.');
   const hasAudio = info.streams.some(stream => stream.codec_type === 'audio');
   const audioOffsetSeconds = audioOffsetFromInfo(info);
-  const args = ['-y', '-hide_banner', '-loglevel', 'error', '-i', sourcePath, '-map', '0:v:0', '-map', '0:a:0?', '-vf', "setpts=PTS-STARTPTS,fps=30,scale=w='min(1920,iw)':h='min(1080,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1", '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p', '-g', '15', '-movflags', '+faststart'];
+  const normalize = "setpts=PTS-STARTPTS,fps=30,scale=w='min(1920,iw)':h='min(1080,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1";
+  const args = ['-y', '-hide_banner', '-loglevel', 'error', ...(onProgress ? ['-progress', 'pipe:1', '-nostats'] : []), '-i', sourcePath, ...(sceneScoresPath ? ['-filter_complex', `[0:v:0]${normalize},split=2[proxy][scenes];[scenes]${sceneScoreFilter(sceneScoresPath)}[scored]`, '-map', '[proxy]'] : ['-map', '0:v:0', '-vf', normalize]), '-map', '0:a:0?', '-c:v', 'libx264', '-preset', proxyPreset, '-crf', '20', '-pix_fmt', 'yuv420p', '-g', '15', '-movflags', '+faststart'];
   if (hasAudio) args.push('-af', `${alignedAudio(audioOffsetSeconds)},apad`, '-c:a', 'aac', '-ar', '48000', '-ac', '2', '-shortest');
   args.push('-t', String(duration), previewPath);
-  await run(ffmpegPath, args);
-  const normalized = await probe(previewPath);
+  if (sceneScoresPath) args.push('-map', '[scored]', '-t', String(duration), '-f', 'null', '-');
+  await run(ffmpegPath, args, { onProgress, durationSeconds: duration, signal });
+  const normalized = await probe(previewPath, { signal });
   const canonical = normalized.streams.find(stream => stream.codec_type === 'video');
   const durationFrames = Number(canonical.nb_frames) || Math.round(Number(canonical.duration) * FPS);
-  await run(ffmpegPath, ['-y', '-hide_banner', '-loglevel', 'error', '-ss', String(Math.min(2, duration / 3)), '-i', previewPath, '-frames:v', '1', '-vf', 'scale=640:-2', thumbnailPath]);
+  await run(ffmpegPath, ['-y', '-hide_banner', '-loglevel', 'error', '-ss', String(Math.min(2, duration / 3)), '-i', previewPath, '-frames:v', '1', '-vf', 'scale=640:-2', thumbnailPath], { signal });
   return { durationFrames, fps: FPS, width: canonical.width, height: canonical.height, hasAudio, audioOffsetSeconds, originalFps: video.avg_frame_rate || video.r_frame_rate };
 }
 
@@ -224,7 +242,7 @@ async function batchGraphic(asset, group, directory) {
   return { ...result, batchCacheHit: false };
 }
 
-export async function renderVideo({ asset, sourcePath, ops, outputPath, thumbnailPath, workingDirectory, graphicCacheDirectory = join(dirname(workingDirectory), 'graphic-cache'), files = {}, onProgress, signal }) {
+export async function renderVideo({ asset, sourcePath, ops, outputPath, thumbnailPath, workingDirectory, graphicCacheDirectory = join(dirname(workingDirectory), 'graphic-cache'), files = {}, sceneScoresPath, onProgress, signal }) {
   checkCancellation(signal);
   await mkdir(workingDirectory, { recursive: true });
   const timelineMap = compileTimeline(asset.durationFrames, ops);
@@ -274,7 +292,10 @@ export async function renderVideo({ asset, sourcePath, ops, outputPath, thumbnai
   }
   const filterPath = join(workingDirectory, 'filters.txt');
   await writeFile(filterPath, filter.join(';\n'));
+  // Scene scores ride on the same render decode; they only feed the estimated overview cuts.
+  if (sceneScoresPath) { filter.push(`[${label}]split=2[rendered][scenes]`, `[scenes]${sceneScoreFilter(sceneScoresPath)}[scored]`); label = 'rendered'; }
   args.push('-filter_complex', filter.join(';'), '-map', `[${label}]`, '-map', '[outa]', '-frames:v', String(durationFrames), '-t', String(durationFrames / FPS), '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart', '-progress', 'pipe:1', '-nostats', outputPath);
+  if (sceneScoresPath) args.push('-map', '[scored]', '-t', String(durationFrames / FPS), '-f', 'null', '-');
   const renderStart = Date.now();
   await run(ffmpegPath, args, { durationSeconds: durationFrames / FPS, onProgress, signal });
   diagnostics.renderMs = Date.now() - renderStart;
