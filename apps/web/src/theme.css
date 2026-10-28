@@ -298,6 +298,9 @@ textarea:focus-visible, select:focus-visible,
 .attachment-thumbnail > span { color: #fff; background: #16181dd9; border-radius: 5px; }
 .attachment-tile figcaption { border-color: var(--border); }
 .attachment-tile figcaption small { color: var(--muted); }
+.attachment-transcript { background: var(--surface-soft); border-left-color: var(--accent-border); }
+.attachment-transcript small, .attachment-transcript-empty { color: var(--muted); }
+.attachment-transcript p { color: var(--text); }
 .attachment-tile figcaption strong { color: var(--text-secondary); }
 .attachment-remove { color: var(--muted); border-radius: 6px; }
 .attachment-remove:hover:not(:disabled) { color: var(--danger); background: var(--danger-surface); }

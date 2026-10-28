@@ -1,22 +1,22 @@
 import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, writeFile, copyFile, stat, rename, rm, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
-import sharp from 'sharp';
 import { ffmpegPath, run } from './engine.mjs';
 import { planCanonicalFrameDecode } from './canonical-frames.mjs';
 import { planRequestContextFrames } from './context-bundle.mjs';
-import { drawingsSvg } from './drawings.mjs';
+import { prepareVersionOverview } from './overview.mjs';
+import { HANDOFF_SCHEMA_VERSION, FRAME_CONVENTION, READING_GUIDE, clock, rangesText, inventoryFile, renderAnnotatedStill, composeSceneSheet, buildHandoffEntry, entryDigest, renderFeedbackJsonl, renderFeedbackVtt } from './handoff.mjs';
+import { groupDrawings } from '../../packages/core/drawing-anchors.mjs';
 import { projectComment } from '../../packages/core/comment-projection.mjs';
-import { projectDrawings, groupDrawings } from '../../packages/core/drawing-anchors.mjs';
-import { feedbackCategory, FEEDBACK_CATEGORY_LABELS } from '../../packages/core/feedback-category.mjs';
+import { FEEDBACK_CATEGORY_LABELS } from '../../packages/core/feedback-category.mjs';
 import { isVisualOp, visualLayerId } from '../../packages/core/layer-snapshot.mjs';
 
 const fail = (message, status = 400) => Object.assign(new Error(message), { status });
 const digest = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const abort = signal => signal?.throwIfAborted();
-const clock = frame => { const milliseconds = Math.round(frame / 30 * 1000); return `${String(Math.floor(milliseconds / 60000)).padStart(2, '0')}:${String(Math.floor(milliseconds / 1000) % 60).padStart(2, '0')}.${String(milliseconds % 1000).padStart(3, '0')}`; };
 const quote = text => (String(text).split('\n').map(line => `> ${line}`).join('\n'));
-const rangesText = ranges => ranges.length ? ranges.map(range => range.frameOut - range.frameIn === 1 ? clock(range.frameIn) : `${clock(range.frameIn)}–${clock(range.frameOut)}`).join(', ') : '현재 영상에 표시할 구간 없음';
+const EXPORT_FILE = /^(?:scenes\/version-\d+\/frame-\d+\.jpg|annotations\/feedback-\d+\/frame-\d+\.jpg|sheets\/feedback-\d+\.jpg|overview\/grid\.jpg|attachments\/asset-\d+\.(?:png|m4a))$/;
+const SHOT_TABLE_LIMIT = 40;
 
 export function selectFeedbackComments(state, targetVersionId, commentIds) {
   if (!state?.project || !Array.isArray(state.versions) || !Array.isArray(state.comments)) throw fail('피드백을 내보낼 프로젝트를 찾지 못했습니다.', 409);
@@ -32,38 +32,39 @@ export function selectFeedbackComments(state, targetVersionId, commentIds) {
   return { targetVersion, comments: comments.slice().sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id)) };
 }
 
-function missingSourceRanges(ranges, timelineMap) {
-  const missing = [];
-  for (const range of ranges) {
-    let cursor = range.frameIn;
-    for (const segment of timelineMap) {
-      if (segment.sourceOut <= cursor || segment.sourceIn >= range.frameOut) continue;
-      if (segment.sourceIn > cursor) missing.push({ frameIn: cursor, frameOut: Math.min(segment.sourceIn, range.frameOut) });
-      cursor = Math.max(cursor, Math.min(segment.sourceOut, range.frameOut));
-    }
-    if (cursor < range.frameOut) missing.push({ frameIn: cursor, frameOut: range.frameOut });
-  }
-  return missing;
-}
-
 const tableText = (text, limit = 120) => {
   const plain = String(text).replace(/\s+/g, ' ').trim(), excerpt = plain.length > limit ? `${plain.slice(0, limit)}…` : plain;
   return excerpt.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/([\[\]])/g, '\\$1');
 };
+const transcriptLabel = transcript => `${transcript.engine}${transcript.model ? ` · ${transcript.model}` : ''}${transcript.language ? ` · ${transcript.language}` : ''}`;
 
 export function renderFeedbackMarkdown(manifest) {
   const statusLabel = { present: '현재 버전에 남아 있음', partial: '일부 구간만 현재 버전에 남아 있음', deleted: '현재 버전에서 삭제된 구간', unavailable: '현재 위치를 확정할 수 없음' };
   const summaryTime = entry => entry.current.ranges.length ? `${rangesText(entry.current.ranges)}${entry.current.status === 'partial' ? ' · 일부 삭제' : ''}` : `작성 v${entry.authored.versionNumber} ${rangesText([entry.authored])} · ${entry.current.status === 'deleted' ? '현재 삭제' : '현재 위치 확인 필요'}`;
   const representative = entry => entry.scenes.find(scene => scene.frame === entry.authored.contextFrame) ?? entry.scenes[0];
-  const lines = ['# 시간별 영상 피드백', '', `프로젝트: ${manifest.project.name}`, `기준: v${manifest.targetVersion.number} · ${manifest.targetVersion.label}`, '', '| 시간 | 장면 내용 | 피드백 요약 | 자료 |', '| --- | --- | --- | --- |'];
+  const lines = ['# 시간별 영상 피드백', '', `프로젝트: ${manifest.project.name}`, `기준: v${manifest.targetVersion.number} · ${manifest.targetVersion.label}`];
+  if (manifest.schemaVersion >= 2) lines.push(`AI·도구용: [feedback.jsonl](feedback.jsonl)은 한 줄에 피드백 하나를 담은 글 자료입니다. 글을 먼저 읽고, 이미지는 필요할 때 피드백별 한 장 요약 → 개별 스틸 순서로 여세요.`);
+  const overview = manifest.overview;
+  if (overview) {
+    const shots = overview.shots.list;
+    lines.push('', '## 영상 개요', '', `길이 ${clock(manifest.targetVersion.durationFrames)} · 자동 컷 감지 ${shots.length}개 구간(추정) · [전체 흐름 이미지 1장](${overview.grid.file})`, '', '| 구간 | 시간 |', '| --- | --- |');
+    for (const shot of shots.slice(0, SHOT_TABLE_LIMIT)) lines.push(`| ${shot.index} | ${rangesText([shot])} |`);
+    if (shots.length > SHOT_TABLE_LIMIT) lines.push('', `구간이 많아 처음 ${SHOT_TABLE_LIMIT}개만 표로 보였습니다. 전체 ${shots.length}개는 manifest.json의 overview.shots에 있습니다.`);
+    lines.push('', '컷 구간은 화면 변화량으로 추정한 값입니다. 피드백 시점과 장면 내용은 사용자 기록을 따릅니다.');
+  }
+  lines.push('', '| 시간 | 장면 내용 | 피드백 요약 | 자료 |', '| --- | --- | --- | --- |');
   for (let index = 0; index < manifest.feedback.length; index++) {
     const entry = manifest.feedback[index], still = representative(entry), annotated = entry.scenes.find(scene => scene.annotatedFile);
-    const links = [...(still ? [`[스틸](${still.file})`] : []), ...(annotated ? [`[그림](${annotated.annotatedFile})`] : []), ...(entry.attachments.length ? [`[첨부 ${entry.attachments.length}개](#feedback-${index + 1}-materials)`] : [])];
+    const links = [...(entry.sheet ? [`[한 장 요약](${entry.sheet.file})`] : []), ...(still ? [`[스틸](${still.file})`] : []), ...(annotated ? [`[그림](${annotated.annotatedFile})`] : []), ...(entry.attachments.length ? [`[첨부 ${entry.attachments.length}개](#feedback-${index + 1}-materials)`] : [])];
     const summary = `${entry.kind === 'note' ? '메모 · ' : ''}${entry.feedback.original || (entry.scenes.some(scene => scene.annotatedFile) || entry.attachments.length ? '그림·첨부 확인' : '장면 기록')}`;
     const supplements = entry.feedback.supplements.length ? ` · 보완 ${entry.feedback.supplements.length}개` : '';
     lines.push(`| [${index + 1}. ${summaryTime(entry)}](#feedback-${index + 1}) | ${tableText(entry.sceneDescription.text || '스틸 참고', 90)} | ${tableText(summary)}${supplements} | ${links.join(' · ') || '아래 내용'} |`);
   }
-  lines.push('', '검토 가능한 시간별 피드백 브리프입니다. 장면 설명은 사용자 기록이며 자동 영상 분석 결과가 아닙니다.', '이 자료는 로컬에서 만들었으며 원본·편집 영상 파일은 포함하지 않았습니다. 외부 전송·AI 해석·음성 전사는 실행하지 않았습니다.', '메모는 문맥 자료입니다. 삭제된 장면은 작성 당시 자료로 확인하고, 불분명한 요청은 확인 항목으로 남겨 주세요.', '');
+  const transcripts = manifest.feedback.flatMap(entry => entry.attachments.filter(attachment => attachment.transcript?.text)), observed = manifest.feedback.some(entry => entry.observations?.length);
+  lines.push('', '검토 가능한 시간별 피드백 브리프입니다. 장면 설명은 사용자 기록이며 자동 영상 분석 결과가 아닙니다.', '이 자료는 로컬에서 만들었으며 원본·편집 영상 파일은 포함하지 않았습니다. 외부 전송·AI 해석·음성 전사는 실행하지 않았습니다.');
+  if (transcripts.length) lines.push(`음성 받아쓰기 ${transcripts.length}개는 사용자가 앱에서 따로 실행한 로컬 자동 결과입니다. 원본 음성과 다를 수 있습니다.`);
+  if (observed) lines.push('‘AI 관찰’은 사용자가 별도로 실행한 모델 결과를 붙인 것입니다. 사용자 기록이 아니며 원문을 대신하지 않습니다.');
+  lines.push('메모는 문맥 자료입니다. 삭제된 장면은 작성 당시 자료로 확인하고, 불분명한 요청은 확인 항목으로 남겨 주세요.', '');
   for (let index = 0; index < manifest.feedback.length; index++) {
     const entry = manifest.feedback[index], still = representative(entry);
     lines.push(`<a id="feedback-${index + 1}"></a>`, '', `## ${index + 1}. ${entry.kind === 'note' ? '메모' : '피드백'} · ${summaryTime(entry)}`, '', `작성 v${entry.authored.versionNumber}: ${rangesText([entry.authored])}`, `현재 v${manifest.targetVersion.number}: ${rangesText(entry.current.ranges)}`);
@@ -74,12 +75,26 @@ export function renderFeedbackMarkdown(manifest) {
       const supplement = entry.feedback.supplements[supplementIndex];
       lines.push(`보완 ${supplementIndex + 1}`, '', quote(supplement.text), '');
     }
+    if (entry.drawingProjection?.length) {
+      lines.push('### 그림 표시', '');
+      for (const drawing of entry.drawingProjection) lines.push(`- 작성 ${clock(drawing.authoredFrame ?? entry.authored.contextFrame)} · ${drawing.description}${drawing.status === 'present' ? ` · 현재 ${clock(drawing.frame)}` : drawing.status === 'deleted' ? ' · 현재 버전에서 삭제된 장면' : ' · 현재 위치 확인 필요'}`);
+      lines.push('');
+    }
+    for (const observation of entry.observations ?? []) {
+      lines.push(`### AI 관찰 · ${observation.provider} ${observation.model} (모델 결과, 사용자 기록 아님${observation.stale ? ' · 이후 피드백이 바뀌어 이전 자료 기준' : ''})`, '', quote(observation.observedScene), '', `이해한 요청: ${observation.feedbackSummary.replace(/\n/g, ' ')}`, '');
+      if (observation.questions.length) lines.push(...observation.questions.map(question => `- 확인: ${question.replace(/\n/g, ' ')}`), '');
+    }
     lines.push(`<a id="feedback-${index + 1}-materials"></a>`, '', '### 자료', '');
+    if (entry.sheet) lines.push(`[피드백 한 장 요약](${entry.sheet.file}) · 기준 장면을 크게, 다른 시점을 아래에 모았습니다.`, '');
     if (still) lines.push(`작성 당시 ${clock(still.frame)}`, '', `![작성 당시 장면](${still.file})`, '');
     for (const scene of entry.scenes.filter(scene => scene.annotatedFile)) lines.push(`요청 그림 · ${clock(scene.frame)}`, '', `![요청 그림과 장면](${scene.annotatedFile})`, '');
     const otherStills = entry.scenes.filter(scene => scene !== still);
     if (otherStills.length) lines.push(`다른 시점 스틸: ${otherStills.map(scene => `[${clock(scene.frame)}](${scene.file})`).join(' · ')}`, '');
-    for (const attachment of entry.attachments) lines.push(`[${attachment.role === 'voice' ? '음성 메모 · 미전사' : attachment.role === 'insert' ? '삽입용 참고 이미지' : '참고 이미지'} · ${attachment.name.replace(/[\[\]\r\n]/g, ' ')}](${attachment.file})`, '');
+    for (const attachment of entry.attachments) {
+      const name = attachment.name.replace(/[\[\]\r\n]/g, ' ');
+      if (attachment.role === 'voice' && attachment.transcript?.text) lines.push(`[음성 메모 · 자동 받아쓰기 · ${name}](${attachment.file})`, '', quote(attachment.transcript.text), '', `받아쓰기: ${transcriptLabel(attachment.transcript)} 로컬 자동 결과 · 원본 음성과 대조 필요`, '');
+      else lines.push(`[${attachment.role === 'voice' ? '음성 메모 · 미전사' : attachment.role === 'insert' ? '삽입용 참고 이미지' : '참고 이미지'} · ${name}](${attachment.file})`, '');
+    }
   }
   lines.push('---', '', `자료 생성: ${manifest.createdAt}`, '정확한 프레임·그림 좌표·작성 이력은 [manifest.json](manifest.json)에 보존했습니다. 자료 링크는 함께 받은 ZIP 안에서 열 수 있습니다.');
   return lines.join('\n');
@@ -91,9 +106,22 @@ async function fileIdentity(path) {
   catch (error) { if (error.code === 'ENOENT') throw fail('내보낼 자료 파일을 찾지 못했습니다. 자료는 생략하지 않았습니다.', 404); throw error; }
 }
 
+const bounded = (value, limit) => typeof value === 'string' && value.length <= limit;
+/** Model observations come from an explicit separate run (see scripts/test-gemini-feedback.mjs); they are never generated here. */
+function validObservationSets(observations) {
+  if (observations === undefined) return [];
+  if (!Array.isArray(observations) || observations.length > 20) throw fail('AI 관찰 자료 형식이 유효하지 않습니다.');
+  for (const set of observations) {
+    if (!set || typeof set !== 'object' || !bounded(set.provider, 40) || !bounded(set.model, 120) || !bounded(set.createdAt, 64) || !Array.isArray(set.items) || set.items.length > 300) throw fail('AI 관찰 자료 형식이 유효하지 않습니다.');
+    for (const item of set.items) if (!item || !bounded(item.id, 160) || !bounded(item.entryDigest, 64) || !bounded(item.observedScene, 4000) || !bounded(item.feedbackSummary, 8000) || !Array.isArray(item.questions) || item.questions.some(question => !bounded(question, 1000)) || !Array.isArray(item.evidenceFrames) || item.evidenceFrames.some(frame => !Number.isSafeInteger(frame) || frame < 0)) throw fail('AI 관찰 항목 형식이 유효하지 않습니다.');
+  }
+  return observations;
+}
+
 /** Portable local brief: no video asset is copied and no model/network client is used. */
-export async function prepareFeedbackExport({ state, targetVersionId, commentIds, files, directory, snapshots = {}, signal }) {
+export async function prepareFeedbackExport({ state, targetVersionId, commentIds, files, directory, overviewDirectory = join(directory, '.overviews'), snapshots = {}, observations, signal }) {
   abort(signal);
+  const observationSets = structuredClone(validObservationSets(observations));
   const selection = selectFeedbackComments(state, targetVersionId, commentIds), selectedIds = new Set(selection.comments.map(comment => comment.id));
   const versionIds = new Set([targetVersionId, ...selection.comments.map(comment => comment.versionId)]);
   const attachmentIds = new Set(selection.comments.flatMap(comment => [...comment.attachmentIds, ...(comment.voiceAssetId ? [comment.voiceAssetId] : [])]));
@@ -108,7 +136,7 @@ export async function prepareFeedbackExport({ state, targetVersionId, commentIds
     if (!authored || authored.assetId !== targetVersion.assetId) throw fail('피드백 작성 버전의 영상을 찾지 못했습니다. 자료는 생략하지 않았습니다.', 409);
     if (comment.sceneDescription !== undefined && (typeof comment.sceneDescription !== 'string' || comment.sceneDescription.length > 500)) throw fail('장면 설명은 500자 이하여야 합니다.');
     if (!Array.isArray(comment.attachmentIds) || comment.attachmentIds.length > 10) throw fail('한 피드백의 첨부 자료는 최대 10개여야 합니다.');
-    const plan = planRequestContextFrames(comment, authored.durationFrames), projection = projectComment(comment, authored, targetVersion);
+    const plan = planRequestContextFrames(comment, authored.durationFrames);
     let group = sourceGroups.get(authored.id);
     if (!group) { group = { authored, frames: new Set(), videoPath: fileSnapshot[authored.mediaUrl.split('/').at(-1)]?.path }; sourceGroups.set(authored.id, group); }
     for (const scene of plan.sceneFrames) group.frames.add(scene.frame);
@@ -118,82 +146,96 @@ export async function prepareFeedbackExport({ state, targetVersionId, commentIds
       if (!attachment || !file || !['reference', 'insert', 'voice'].includes(attachment.role) || (attachment.role === 'voice' ? !attachment.mimeType.startsWith('audio/') : !attachment.mimeType.startsWith('image/'))) throw fail('피드백에 저장된 참고 자료를 찾지 못했습니다. 자료는 생략하지 않았습니다.', 404);
       attachmentRecords.set(id, { attachment, path: attachment.role === 'voice' ? file.path : file.normalizedPath });
     }
-    plans.push({ comment, authored, plan, projection, ids });
+    plans.push({ comment, authored, plan, projection: projectComment(comment, authored, targetVersion), ids });
   }
   if ([...sourceGroups.values()].reduce((sum, group) => sum + group.frames.size, 0) > 1200 || attachmentRecords.size > 300) throw fail('한 자료 묶음은 최대 1,200개 장면과 300개 첨부를 지원합니다. 피드백을 나누어 선택해 주세요. 자료는 생략하지 않았습니다.', 413);
   plans.sort((a, b) => (a.projection.ranges[0]?.frameIn ?? Infinity) - (b.projection.ranges[0]?.frameIn ?? Infinity) || a.comment.createdAt.localeCompare(b.comment.createdAt) || a.comment.id.localeCompare(b.comment.id));
-  const identities = [];
+  const targetVideoPath = fileSnapshot[targetVersion.mediaUrl.split('/').at(-1)]?.path;
+  const identities = [await fileIdentity(targetVideoPath)];
   for (const group of sourceGroups.values()) identities.push(await fileIdentity(group.videoPath));
   for (const record of attachmentRecords.values()) identities.push(await fileIdentity(record.path));
   const relevantOps = (snapshot.ops || []).filter(op => comments.some(comment => comment.id === op.commentId && comment.layerChange));
-  const cacheKey = digest({ format: 'feedback-export-v3-categories', project: { id: snapshot.project.id, name: snapshot.project.name }, targetVersion, comments, authoredVersions: [...sourceGroups.values()].map(group => group.authored), identities, relevantOps, layers: comments.filter(comment => comment.layerChange).map(comment => layerSnapshots[comment.versionId]) });
-  const finalDirectory = join(directory, cacheKey), manifestPath = join(finalDirectory, 'manifest.json'), markdownPath = join(finalDirectory, 'feedback.md'), archivePath = join(finalDirectory, 'feedback.zip');
+  const transcripts = [...attachmentRecords.values()].map(record => record.attachment.transcript ?? null);
+  const cacheKey = digest({ format: 'feedback-export-v4-ai-handoff-categories', project: { id: snapshot.project.id, name: snapshot.project.name }, targetVersion, comments, authoredVersions: [...sourceGroups.values()].map(group => group.authored), identities, relevantOps, transcripts, observations: observationSets, layers: comments.filter(comment => comment.layerChange).map(comment => layerSnapshots[comment.versionId]) });
+  const finalDirectory = join(directory, cacheKey), manifestPath = join(finalDirectory, 'manifest.json'), markdownPath = join(finalDirectory, 'feedback.md'), jsonlPath = join(finalDirectory, 'feedback.jsonl'), vttPath = join(finalDirectory, 'feedback.vtt'), archivePath = join(finalDirectory, 'feedback.zip');
   try {
     const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
-    if (manifest.cacheKey === cacheKey && manifest.kind === 'video-feedback-handoff' && manifest.sourceVideoIncluded === false && manifest.renderedVideoIncluded === false && Array.isArray(manifest.files) && manifest.files.every(file => /^(?:scenes\/version-\d+\/frame-\d+\.jpg|annotations\/feedback-\d+\/frame-\d+\.png|attachments\/asset-\d+\.(?:png|m4a))$/.test(file.path))) {
-      await fileIdentity(markdownPath); await fileIdentity(archivePath);
+    if (manifest.cacheKey === cacheKey && manifest.kind === 'video-feedback-handoff' && manifest.schemaVersion === HANDOFF_SCHEMA_VERSION && manifest.sourceVideoIncluded === false && manifest.renderedVideoIncluded === false && Array.isArray(manifest.files) && manifest.files.every(file => EXPORT_FILE.test(file.path))) {
+      for (const path of [markdownPath, jsonlPath, vttPath, archivePath]) await fileIdentity(path);
       for (const file of manifest.files) if ((await stat(join(finalDirectory, file.path))).size !== file.bytes) throw new Error('cached file changed');
       abort(signal);
-      return { directory: finalDirectory, manifestPath, markdownPath, archivePath, manifest, commentCount: manifest.feedback.length, sceneCount: manifest.stats.sceneCount, cacheHit: true, diagnostics: { ffmpegRuns: 0, elapsedMs: 0 } };
+      return { directory: finalDirectory, manifestPath, markdownPath, jsonlPath, vttPath, archivePath, manifest, commentCount: manifest.feedback.length, sceneCount: manifest.stats.sceneCount, cacheHit: true, diagnostics: { ffmpegRuns: 0, elapsedMs: 0 } };
     }
   } catch (error) { abort(signal); if (['EACCES', 'EPERM'].includes(error.code)) throw error; }
   await mkdir(directory, { recursive: true }); const work = await mkdtemp(join(directory, '.feedback-export-')), started = performance.now();
-  let completed = false, ffmpegRuns = 0;
+  let completed = false, stillRuns = 0;
   try {
     const assets = [], sceneFiles = new Map(), attachmentFiles = new Map();
-    const inventory = async (path, mimeType, role) => { const bytes = await readFile(join(work, path)); assets.push({ path, mimeType, role, bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') }); };
+    const inventory = async (path, mimeType, role) => { assets.push(await inventoryFile(work, path, mimeType, role)); };
     let versionIndex = 0;
     for (const [versionId, group] of sourceGroups) {
       abort(signal); const folder = `scenes/version-${String(++versionIndex).padStart(3, '0')}`; await mkdir(join(work, folder), { recursive: true });
       const frames = [...group.frames].sort((a, b) => a - b), decode = planCanonicalFrameDecode(frames);
-      await run(ffmpegPath, ['-y', '-hide_banner', '-loglevel', 'error', '-threads', '1', ...decode.inputArgs, '-i', group.videoPath, '-map', '0:v:0', '-an', '-sn', '-dn', '-vf', `select=${decode.select},scale=w='min(960,iw)':h='min(960,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1`, '-fps_mode', 'vfr', '-frames:v', String(frames.length), '-q:v', '2', '-start_number', '0', '-threads', '1', join(work, folder, '%06d.jpg')], { signal, timeout: 120_000 }); ffmpegRuns++;
+      await run(ffmpegPath, ['-y', '-hide_banner', '-loglevel', 'error', '-threads', '1', ...decode.inputArgs, '-i', group.videoPath, '-map', '0:v:0', '-an', '-sn', '-dn', '-vf', `select=${decode.select},scale=w='min(960,iw)':h='min(960,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1`, '-fps_mode', 'vfr', '-frames:v', String(frames.length), '-q:v', '2', '-start_number', '0', '-threads', '1', join(work, folder, '%06d.jpg')], { signal, timeout: 120_000 }); stillRuns++;
       const actual = (await readdir(join(work, folder))).filter(name => /^\d{6}\.jpg$/.test(name)); if (actual.length !== frames.length) throw fail('작성 버전 길이와 스틸 개수가 맞지 않습니다. 자료는 생략하지 않았습니다.', 409);
       for (let index = 0; index < frames.length; index++) {
         const file = `${folder}/frame-${String(frames[index]).padStart(6, '0')}.jpg`;
         await rename(join(work, folder, `${String(index).padStart(6, '0')}.jpg`), join(work, file)); await inventory(file, 'image/jpeg', 'scene'); sceneFiles.set(`${versionId}:${frames[index]}`, file);
       }
     }
+    abort(signal);
+    const overviewResult = await prepareVersionOverview({ versionId: targetVersion.id, videoPath: targetVideoPath, durationFrames: targetVersion.durationFrames, directory: overviewDirectory, signal });
+    await mkdir(join(work, 'overview'), { recursive: true }); await copyFile(overviewResult.imagePath, join(work, 'overview/grid.jpg')); await inventory('overview/grid.jpg', 'image/jpeg', 'overview');
     let attachmentIndex = 0;
     for (const [id, record] of attachmentRecords) {
       abort(signal); const voice = record.attachment.role === 'voice', file = `attachments/asset-${String(++attachmentIndex).padStart(4, '0')}${voice ? '.m4a' : '.png'}`;
       await mkdir(join(work, 'attachments'), { recursive: true }); await copyFile(record.path, join(work, file)); await inventory(file, voice ? 'audio/mp4' : 'image/png', 'attachment');
-      attachmentFiles.set(id, { id, name: record.attachment.name, role: record.attachment.role, mimeType: voice ? 'audio/mp4' : 'image/png', file, ...(voice ? { automaticTranscription: false, source: 'normalized-audio-only' } : {}) });
+      const transcript = voice && record.attachment.transcript?.text ? { transcript: structuredClone(record.attachment.transcript) } : {};
+      attachmentFiles.set(id, { id, name: record.attachment.name, role: record.attachment.role, mimeType: voice ? 'audio/mp4' : 'image/png', file, ...(voice ? { automaticTranscription: Boolean(transcript.transcript), source: 'normalized-audio-only', ...transcript } : {}) });
     }
-    const feedback = [];
+    const feedback = [], observedIds = new Set(observationSets.flatMap(set => set.items.map(item => item.id)));
     for (let index = 0; index < plans.length; index++) {
-      abort(signal); const { comment, authored, plan, projection, ids } = plans[index], scenes = [];
+      abort(signal); const { comment, authored, plan, ids } = plans[index], scenes = [], cells = [], number = index + 1;
       const drawingsByFrame = new Map(groupDrawings(plan.drawings, comment.contextFrame ?? comment.frameIn).map(group => [group.frame, group.drawings]));
       for (const scene of plan.sceneFrames) {
         const file = sceneFiles.get(`${authored.id}:${scene.frame}`), drawings = drawingsByFrame.get(scene.frame); let annotatedFile;
         if (drawings?.length) {
-          annotatedFile = `annotations/feedback-${String(index + 1).padStart(4, '0')}/frame-${String(scene.frame).padStart(6, '0')}.png`;
-          await mkdir(join(work, `annotations/feedback-${String(index + 1).padStart(4, '0')}`), { recursive: true });
-          const metadata = await sharp(join(work, file)).metadata();
-          await sharp(join(work, file)).composite([{ input: Buffer.from(drawingsSvg(metadata.width, metadata.height, drawings)), left: 0, top: 0 }]).png().toFile(join(work, annotatedFile)); await inventory(annotatedFile, 'image/png', 'annotation');
+          annotatedFile = `annotations/feedback-${String(number).padStart(4, '0')}/frame-${String(scene.frame).padStart(6, '0')}.jpg`;
+          await mkdir(join(work, `annotations/feedback-${String(number).padStart(4, '0')}`), { recursive: true });
+          await renderAnnotatedStill(join(work, file), drawings, join(work, annotatedFile)); await inventory(annotatedFile, 'image/jpeg', 'annotation');
         }
         scenes.push({ ...scene, file, ...(annotatedFile ? { annotatedFile } : {}) });
+        cells.push({ frame: scene.frame, roles: scene.roles, path: join(work, file), ...(annotatedFile ? { annotatedPath: join(work, annotatedFile) } : {}) });
       }
+      const sheetFile = `sheets/feedback-${String(number).padStart(4, '0')}.jpg`; await mkdir(join(work, 'sheets'), { recursive: true });
+      const sheet = { file: sheetFile, ...await composeSceneSheet(cells, comment.contextFrame ?? comment.frameIn, join(work, sheetFile)) }; await inventory(sheetFile, 'image/jpeg', 'sheet');
       let layerMetadata = {};
       if (comment.layerChange) {
         const target = (layerSnapshots[comment.versionId] || []).find(op => isVisualOp(op) && visualLayerId(op) === comment.layerChange.targetLayerId && op.id === comment.layerChange.targetOpId);
         if (!target) throw fail('기존 그래픽 변경 대상 기록을 찾지 못했습니다. 자료는 생략하지 않았습니다.', 409);
         layerMetadata = { layerChange: comment.layerChange, layerTarget: target, proposedOperations: relevantOps.filter(op => op.commentId === comment.id) };
       }
-      feedback.push({ id: comment.id, kind: comment.kind ?? 'request', category: feedbackCategory(comment), status: comment.status, createdAt: comment.createdAt, sceneDescription: { source: comment.sceneDescription ? 'user' : 'not-provided', text: comment.sceneDescription ?? '' }, feedback: { original: comment.text, supplements: comment.supplements ?? [] }, authored: { versionId: authored.id, versionNumber: authored.number, frameIn: comment.frameIn, frameOut: comment.frameOut, contextFrame: comment.contextFrame ?? comment.frameIn, sourceRanges: comment.sourceRanges }, current: { versionId: targetVersion.id, ...projection, deletedSourceRanges: missingSourceRanges(comment.sourceRanges, targetVersion.timelineMap) }, drawings: plan.drawings, drawingProjection: projectDrawings(comment, authored, targetVersion), scenes, attachments: ids.map(id => attachmentFiles.get(id)), ...layerMetadata });
+      const entry = buildHandoffEntry({ number, comment, authored, target: targetVersion, plan, scenes, sheet, attachments: ids.map(id => attachmentFiles.get(id)), layerMetadata });
+      const entryObservations = observationSets.flatMap(set => set.items.filter(item => item.id === entry.id).map(item => ({ source: 'model', provider: set.provider, model: set.model, createdAt: set.createdAt, stale: item.entryDigest !== entryDigest(entry), observedScene: item.observedScene, feedbackSummary: item.feedbackSummary, questions: item.questions, evidenceFrames: item.evidenceFrames })));
+      feedback.push(entryObservations.length ? { ...entry, observations: entryObservations } : entry);
     }
-    const manifest = { schemaVersion: 1, kind: 'video-feedback-handoff', cacheKey, createdAt: new Date().toISOString(), localOnly: true, modelCalled: false, networkUsed: false, sourceVideoIncluded: false, renderedVideoIncluded: false, automaticTranscription: false, frameConvention: '30fps; half-open ranges [frameIn,frameOut)', project: { id: snapshot.project.id, name: snapshot.project.name }, targetVersion: { id: targetVersion.id, number: targetVersion.number, label: targetVersion.label, durationFrames: targetVersion.durationFrames, fps: 30 }, feedback, files: assets, stats: { commentCount: feedback.length, sceneCount: sceneFiles.size, annotationCount: assets.filter(file => file.role === 'annotation').length, attachmentCount: attachmentFiles.size, authoredVersionCount: sourceGroups.size }, diagnostics: { ffmpegRuns } };
-    await writeFile(join(work, 'manifest.json'), JSON.stringify(manifest, null, 2)); await writeFile(join(work, 'feedback.md'), renderFeedbackMarkdown(manifest)); abort(signal);
+    const unmatchedObservations = [...observedIds].filter(id => !feedback.some(entry => entry.id === id)).length;
+    const overview = { versionId: targetVersion.id, versionNumber: targetVersion.number, durationFrames: targetVersion.durationFrames, grid: { file: 'overview/grid.jpg', ...overviewResult.grid }, shots: overviewResult.shots };
+    const stats = { commentCount: feedback.length, sceneCount: sceneFiles.size, annotationCount: assets.filter(file => file.role === 'annotation').length, sheetCount: feedback.length, attachmentCount: attachmentFiles.size, authoredVersionCount: sourceGroups.size, shotCount: overview.shots.list.length, transcriptCount: [...attachmentFiles.values()].filter(item => item.transcript).length, observationCount: feedback.reduce((sum, entry) => sum + (entry.observations?.length ?? 0), 0), unmatchedObservationCount: unmatchedObservations };
+    const manifest = { schemaVersion: HANDOFF_SCHEMA_VERSION, kind: 'video-feedback-handoff', cacheKey, createdAt: new Date().toISOString(), localOnly: true, modelCalled: false, networkUsed: false, sourceVideoIncluded: false, renderedVideoIncluded: false, automaticTranscription: false, modelObservationsIncluded: stats.observationCount > 0, frameConvention: FRAME_CONVENTION, guide: READING_GUIDE, project: { id: snapshot.project.id, name: snapshot.project.name }, targetVersion: { id: targetVersion.id, number: targetVersion.number, label: targetVersion.label, durationFrames: targetVersion.durationFrames, fps: 30 }, overview, feedback, files: assets, stats, diagnostics: { ffmpegRuns: stillRuns + overviewResult.diagnostics.ffmpegRuns, stillRuns, overviewRuns: overviewResult.diagnostics.ffmpegRuns, overviewCacheHit: overviewResult.cacheHit } };
+    await writeFile(join(work, 'manifest.json'), JSON.stringify(manifest, null, 2)); await writeFile(join(work, 'feedback.md'), renderFeedbackMarkdown(manifest));
+    await writeFile(join(work, 'feedback.jsonl'), renderFeedbackJsonl(manifest)); await writeFile(join(work, 'feedback.vtt'), renderFeedbackVtt(manifest)); abort(signal);
     // Every entry is generated locally with portable relative paths; no source/edited video is added.
-    const zipList = ['feedback.md', 'manifest.json', ...assets.map(asset => asset.path)].join('\n') + '\n';
+    const zipList = ['feedback.md', 'feedback.jsonl', 'feedback.vtt', 'manifest.json', ...assets.map(asset => asset.path)].join('\n') + '\n';
     // zip's -@ input is supplied through a tiny subprocess, without a shell or interpolated command.
     await zipFiles(work, join(work, 'feedback.zip'), zipList, signal);
     abort(signal);
     await rm(finalDirectory, { recursive: true, force: true }); await rename(work, finalDirectory); completed = true;
-    return { directory: finalDirectory, manifestPath, markdownPath, archivePath, manifest, commentCount: feedback.length, sceneCount: sceneFiles.size, cacheHit: false, diagnostics: { ffmpegRuns, elapsedMs: Math.round(performance.now() - started) } };
+    return { directory: finalDirectory, manifestPath, markdownPath, jsonlPath, vttPath, archivePath, manifest, commentCount: feedback.length, sceneCount: sceneFiles.size, cacheHit: false, diagnostics: { ...manifest.diagnostics, elapsedMs: Math.round(performance.now() - started) } };
   } finally { if (!completed) await rm(work, { recursive: true, force: true }); }
 }
 
-async function zipFiles(directory, path, list, signal) {
+export async function zipFiles(directory, path, list, signal) {
   // The platform utility accepts explicit generated relative entry names; cwd keeps the archive portable.
   const { spawn } = await import('node:child_process');
   await new Promise((resolve, reject) => {

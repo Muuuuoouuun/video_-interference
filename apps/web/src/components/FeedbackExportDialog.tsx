@@ -44,9 +44,9 @@ export function FeedbackExportDialog({ open, busy, result, error, onClose, onRet
       : error ? <div className="feedback-export-status"><p role="alert">{error}</p><button className="secondary" onClick={onRetry}>다시 준비</button></div>
         : result ? <>
           <p className="feedback-export-summary">피드백·메모 <strong>{result.commentCount}개</strong>와 장면 스틸 <strong>{result.sceneCount}장</strong>을 준비했습니다.</p>
-          <p className="feedback-export-description">각 시점의 장면 설명과 요청을 함께 전달합니다. 그림이 표시된 스틸과 첨부 자료는 묶음에 들어갑니다. 원본·편집 영상 파일은 포함하지 않으며, 외부 전송은 없습니다.</p>
+          <p className="feedback-export-description">각 시점의 장면 설명과 요청, 그림 위치 문장을 함께 전달합니다. 피드백마다 한 장 요약 이미지와 영상 전체 흐름 이미지, 그림이 표시된 스틸과 첨부 자료가 묶음에 들어갑니다. 원본·편집 영상 파일은 포함하지 않으며, 외부 전송은 없습니다.</p>
           <div className="feedback-export-actions"><a className="primary" href={`${result.archiveUrl}?download=1`} download><Download size={16} />피드백 묶음 받기</a><button className="secondary" disabled={!text} onClick={() => void copyText()}><Copy size={15} />텍스트 복사</button></div>
-          <div className="feedback-export-links"><a href={`${result.markdownUrl}?download=1`} download><FileText size={13} />문서만 받기</a><a href={`${result.manifestUrl}?download=1`} download>구조화 데이터 받기</a>{text ? <button className="quiet" onClick={() => setShowText(value => !value)} aria-expanded={showText}>{showText ? '문서 접기' : '문서 확인'}</button> : null}</div>
+          <div className="feedback-export-links"><a href={`${result.markdownUrl}?download=1`} download><FileText size={13} />문서만 받기</a><a href={`${result.manifestUrl}?download=1`} download>구조화 데이터 받기</a><a href={`${result.jsonlUrl}?download=1`} download title="한 줄에 피드백 하나 · AI와 다른 도구가 먼저 읽는 글 자료">AI용 글 자료(JSONL)</a><a href={`${result.vttUrl}?download=1`} download title="기준 버전 영상 위에 피드백을 자막으로 띄웁니다">자막 형식(VTT)</a>{text ? <button className="quiet" onClick={() => setShowText(value => !value)} aria-expanded={showText}>{showText ? '문서 접기' : '문서 확인'}</button> : null}</div>
           {textError ? <p className="feedback-export-copy-status">텍스트 미리보기를 읽지 못했습니다. 문서나 묶음을 내려받아 확인할 수 있습니다.</p> : null}
           {copyStatus ? <p className="feedback-export-copy-status" role="status">{copyStatus}</p> : null}
           {showText ? <textarea ref={textArea} className="feedback-export-text" aria-label="전달할 시간별 피드백 문서" readOnly value={text} /> : null}

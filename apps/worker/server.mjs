@@ -20,6 +20,7 @@ import { prepareFeedbackExport, selectFeedbackComments } from './feedback-export
 import { preparePremiereExport } from './premiere-export.mjs';
 import { FEEDBACK_CATEGORIES } from '../../packages/core/feedback-category.mjs';
 import { IMAGE_ATTACHMENT_LIMIT, VOICE_MAX_BYTES, VOICE_MAX_SECONDS } from '../../packages/core/comment-attachments.mjs';
+import { transcribeVoice, transcriptionConfig } from './transcription.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const storageRoot = process.env.VI_STORAGE_ROOT || join(root, 'storage');
@@ -42,13 +43,14 @@ const initializationTasks = new Set();
 const filmstripTasks = new Map();
 const feedbackExportTasks = new Map();
 let premiereExportInFlight = false;
+const transcriptionControllers = new Map();
 let filmstripTail = Promise.resolve();
 
 await mkdir(join(storageRoot, 'media'), { recursive: true });
 await mkdir(join(storageRoot, 'jobs'), { recursive: true });
 
 function publicState() {
-  const capabilities = { ffmpeg: true, interpreter: interpreterMode(), interpreterLabel: interpreterMode() === 'anthropic' ? 'Claude API 연결됨 · 승인 후 실행' : '로컬 규칙 해석 · AI API 미연결', transcription: false, maxDurationSeconds: 600, fps: 30, supportedOps: ['cut', 'trim', 'speed', 'subtitle', 'overlay', 'audio', 'note'] };
+  const capabilities = { ffmpeg: true, interpreter: interpreterMode(), interpreterLabel: interpreterMode() === 'anthropic' ? 'Claude API 연결됨 · 승인 후 실행' : '로컬 규칙 해석 · AI API 미연결', transcription: Boolean(transcriptionConfig()), maxDurationSeconds: 600, fps: 30, supportedOps: ['cut', 'trim', 'speed', 'subtitle', 'overlay', 'audio', 'note'] };
   if (!data.state) return { empty: true, capabilities };
   const comments = data.state.comments.filter(comment => !comment.deletedAt), ids = new Set(comments.map(comment => comment.id));
   return { ...data.state, markers: data.state.markers ?? [], comments, deletedComments: data.state.comments.filter(comment => comment.deletedAt), ops: data.state.ops.filter(op => ids.has(op.commentId)), capabilities };
@@ -337,12 +339,13 @@ async function prepareCommentContext(comment, workspace) {
   try {
     const mediaId = version.mediaUrl.split('/').at(-1);
     const layerContext = comment.layerChange ? { targetLayer: versionLayers(version.id).layers.find(layer => layer.id === comment.layerChange.targetLayerId), proposedOperations: workspace.ops.filter(op => op.commentId === comment.id).map(op => structuredClone(op)) } : undefined;
-    bundle = await prepareRequestContextBundle(comment, { versionPath: data.files[mediaId].path, durationFrames: version.durationFrames, directory: join(storageRoot, 'jobs', 'context-bundles'), layerContext, attachments: workspace.attachments, files: data.files, signal: controller.signal });
+    bundle = await prepareRequestContextBundle(comment, { versionPath: data.files[mediaId].path, durationFrames: version.durationFrames, version, directory: join(storageRoot, 'jobs', 'context-bundles'), layerContext, attachments: workspace.attachments, files: data.files, signal: controller.signal });
     const records = {};
     for (const image of [...bundle.manifest.sceneFrames, ...bundle.manifest.attachments]) {
       const id = uid('context_file'); image.mediaUrl = `/media/${id}`;
       records[id] = { path: join(bundle.directory, image.file), mimeType: image.mimeType, name: image.file };
     }
+    for (const file of bundle.manifest.files.filter(item => ['annotation', 'sheet'].includes(item.role))) records[uid('context_file')] = { path: join(bundle.directory, file.path), mimeType: file.mimeType, name: file.path };
     const manifestId = uid('context_manifest'); records[manifestId] = { path: bundle.manifestPath, mimeType: 'application/json; charset=utf-8', name: 'manifest.json' };
     await writeFile(bundle.manifestPath, JSON.stringify(bundle.manifest, null, 2));
     let archiveUrl;
@@ -398,18 +401,40 @@ async function exportFeedback(input, workspace) {
   const controller = new AbortController();
   const promise = (async () => {
     try {
-      const result = await prepareFeedbackExport({ state: requestSnapshot, targetVersionId: targetVersion.id, commentIds: comments.map(comment => comment.id), files: fileSnapshot, snapshots: snapshotSnapshot, directory: join(storageRoot, 'feedback-exports'), signal: controller.signal });
+      const result = await prepareFeedbackExport({ state: requestSnapshot, targetVersionId: targetVersion.id, commentIds: comments.map(comment => comment.id), files: fileSnapshot, snapshots: snapshotSnapshot, directory: join(storageRoot, 'feedback-exports'), overviewDirectory: join(storageRoot, 'overviews'), signal: controller.signal });
       controller.signal.throwIfAborted(); assertWorkspace(workspace);
       const records = {}, prefix = `feedback_${result.manifest.cacheKey}`;
       records[`${prefix}_manifest`] = { path: result.manifestPath, mimeType: 'application/json; charset=utf-8', name: 'manifest.json' };
       records[`${prefix}_markdown`] = { path: result.markdownPath, mimeType: 'text/markdown; charset=utf-8', name: 'feedback.md' };
+      records[`${prefix}_jsonl`] = { path: result.jsonlPath, mimeType: 'application/x-ndjson; charset=utf-8', name: 'feedback.jsonl' };
+      records[`${prefix}_vtt`] = { path: result.vttPath, mimeType: 'text/vtt; charset=utf-8', name: 'feedback.vtt' };
       records[`${prefix}_archive`] = { path: result.archivePath, mimeType: 'application/zip', name: `${workspace.project.name}-feedback.zip` };
       Object.assign(data.files, records); save();
-      return { manifestUrl: `/media/${prefix}_manifest`, markdownUrl: `/media/${prefix}_markdown`, archiveUrl: `/media/${prefix}_archive`, commentCount: result.commentCount, sceneCount: result.sceneCount };
+      return { manifestUrl: `/media/${prefix}_manifest`, markdownUrl: `/media/${prefix}_markdown`, jsonlUrl: `/media/${prefix}_jsonl`, vttUrl: `/media/${prefix}_vtt`, archiveUrl: `/media/${prefix}_archive`, commentCount: result.commentCount, sceneCount: result.sceneCount };
     } finally { feedbackExportTasks.delete(key); }
   })();
   feedbackExportTasks.set(key, { promise, controller });
   return promise;
+}
+
+/** Explicit, local-only speech-to-text for one voice memo. Saving or exporting never starts this. */
+async function transcribeAttachment(id, workspace) {
+  assertWorkspace(workspace);
+  const attachment = workspace.attachments.find(item => item.id === id);
+  if (!attachment) throw fail('첨부 자료를 찾지 못했습니다.', 404);
+  if (attachment.role !== 'voice') throw fail('음성 메모만 받아쓸 수 있습니다.', 409);
+  const config = transcriptionConfig();
+  if (!config) throw fail('로컬 받아쓰기가 설정되지 않았습니다. WHISPER_CPP_PATH와 WHISPER_MODEL_PATH를 설정해 주세요.', 409);
+  if (transcriptionControllers.has(id)) throw fail('이 음성을 이미 받아쓰는 중입니다.', 409);
+  const audioPath = data.files[id]?.path; if (!audioPath) throw fail('음성 파일을 찾지 못했습니다.', 404);
+  const controller = new AbortController(); transcriptionControllers.set(id, controller);
+  try {
+    const transcript = await transcribeVoice({ audioPath, directory: join(storageRoot, 'jobs'), config, signal: controller.signal });
+    assertWorkspace(workspace);
+    attachment.transcript = transcript; save();
+    process.stdout.write(`Local transcription prepared for ${id}: ${transcript.segments.length} segments; external transmission: none\n`);
+    return attachment;
+  } finally { transcriptionControllers.delete(id); }
 }
 
 function cancelFilmstrips(message) {
@@ -563,7 +588,7 @@ async function handleRequest(req, res) {
       return json(res, 201, createLayerChange(layerChangeMatch[1], layerChangeMatch[2], input));
     }
     if (req.method === 'POST' && path === '/api/assets') {
-      if (importing || rendering || attaching || interpreting.size || feedbackExportTasks.size) throw fail('미디어 업로드·해석·렌더가 끝난 후 새 영상을 열어 주세요.', 409);
+      if (importing || rendering || attaching || interpreting.size || feedbackExportTasks.size || transcriptionControllers.size) throw fail('미디어 업로드·해석·렌더·받아쓰기가 끝난 후 새 영상을 열어 주세요.', 409);
       const name = safeName(req); if (!/\.(mp4|mov|m4v|webm|mkv|avi)$/i.test(name)) throw fail('MP4, MOV, M4V, WebM, MKV, AVI 영상을 지원합니다.');
       const sourcePath = join(storageRoot, 'media', `${uid('source')}${extname(name).toLowerCase()}`);
       importing = true; cancelFilmstrips('새 영상 열기를 우선 실행합니다. 현재 영상에서 썸네일을 다시 불러와 주세요.');
@@ -606,6 +631,12 @@ async function handleRequest(req, res) {
       const markers = workspace.markers ?? [], index = markers.findIndex(item => item.id === markerMatch[1]);
       if (index < 0) throw fail('마커를 찾지 못했습니다.', 404);
       const [removed] = markers.splice(index, 1); save(); return json(res, 200, removed);
+    }
+    const transcribeMatch = path.match(/^\/api\/attachments\/([\w-]+)\/transcribe$/);
+    if (req.method === 'POST' && transcribeMatch) {
+      const { input, workspace } = await projectBody(req);
+      if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).length) throw fail('받아쓰기에는 추가 값이 필요하지 않습니다.');
+      return json(res, 200, await transcribeAttachment(transcribeMatch[1], workspace));
     }
     if (req.method === 'POST' && path === '/api/comments') { const { input, workspace } = await projectBody(req); assertWorkspace(workspace); return json(res, 201, createComment(input)); }
     const commentMatch = path.match(/^\/api\/comments\/([\w-]+)$/);
@@ -706,6 +737,7 @@ async function shutdown() {
   cancelFilmstrips('앱을 종료하는 중입니다.');
   for (const item of feedbackExportTasks.values()) item.controller.abort(reason);
   for (const controller of interpretationControllers.values()) controller.abort(reason);
+  for (const controller of transcriptionControllers.values()) controller.abort(reason);
   for (const [id, controller] of jobControllers) {
     const job = data.state?.jobs.find(item => item.id === id); if (job) job.cancelRequested = true;
     controller.abort(reason);

@@ -27,6 +27,11 @@
 .attachment-audio audio { display: block; width: calc(100% - 16px); height: 32px; margin: 0 8px 10px; color-scheme: dark; }
 .attachment-audio figcaption { border-top: 0; padding-top: 0; }
 .attachment-audio figcaption small { display: none; }
+.attachment-transcript { margin: 0 8px 10px; padding: 8px 10px; border-left: 2px solid #4f7a63; background: #0d1512; border-radius: 4px; }
+.attachment-transcript small { display: flex; align-items: center; gap: 5px; margin-bottom: 5px; color: #91b6a3; font-size: 11px; }
+.attachment-transcript p { max-height: 9.5em; overflow: auto; color: #d7e3dc; font-size: 12px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+.attachment-transcript-empty { margin: 0 8px 10px; color: #91b6a3; font-size: 11px; }
+.attachment-transcribe { display: inline-flex; align-items: center; gap: 5px; margin: 0 8px 10px; font-size: 11px; }
 .attachment-preview { color: #e4ede7; width: min(960px, 92vw); max-height: 90dvh; padding: 0; border: 1px solid #40574b; border-radius: 12px; background: #131b17; box-shadow: 0 24px 100px #0009; }
 .attachment-preview::backdrop { background: #050908d9; }
 .attachment-preview header { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 16px 20px; border-bottom: 1px solid #2e3b33; }

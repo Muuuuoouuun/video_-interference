@@ -7,7 +7,7 @@ import sharp from 'sharp';
 import { ffmpegPath, ingest, mapToSource, renderVideo, run } from '../apps/worker/engine.mjs';
 
 const hash = async path => createHash('sha256').update(await readFile(path)).digest('hex');
-const codeFiles = ['apps/worker/feedback-export.mjs', 'apps/worker/canonical-frames.mjs', 'apps/worker/drawings.mjs', 'packages/core/comment-projection.mjs', 'packages/core/drawing-anchors.mjs'];
+const codeFiles = ['apps/worker/feedback-export.mjs', 'apps/worker/handoff.mjs', 'apps/worker/overview.mjs', 'apps/worker/canonical-frames.mjs', 'apps/worker/drawings.mjs', 'packages/core/comment-projection.mjs', 'packages/core/drawing-anchors.mjs', 'packages/core/drawing-text.mjs'];
 
 /** Local fixture only: preserve the supplied video and never touch the live application project. */
 export async function verifyFeedbackExport({ sourcePath, directory }) {
@@ -127,11 +127,42 @@ export async function verifyFeedbackExport({ sourcePath, directory }) {
     assert.ok(rgb.reduce((sum, value, index) => sum + Math.abs(value - unmarkedRgb[index]), 0) > 50, 'The annotation fixture must visibly change the unmarked still.');
     annotatedChecks.push({ feedbackId: item.id, authoredFrame: scene.frame, annotatedFile: scene.annotatedFile, rgb, unmarkedRgb, sceneMeanAbsoluteError });
   }
+  const textChecks = await verifyTextOutputs({ result, manifest, markdown, archiveEntries, unpacked, deletedId: deleted.id });
   assert.equal(JSON.stringify(state), stateBefore); assert.equal(await hash(sourcePath), sourceHash); assert.equal(await hash(canonicalPath), canonicalHash); assert.equal(await hash(editedPath), editedHash);
   for (const path of codeFiles) assert.equal(await hash(new URL(`../${path}`, import.meta.url)), codeHashes[path], `Checked module changed during verification: ${path}`);
-  const report = { checkedAt: new Date().toISOString(), sourcePath, sourceHash, sourcePreserved: true, versionsPreserved: true, statePreserved: true, fetchCalls: networkCalls, codeHashes, archivePath: result.archivePath, manifestPath: result.manifestPath, markdownPath: result.markdownPath, unpacked, archiveEntries, commentCount: result.commentCount, sceneCount: result.sceneCount, annotatedChecks, diagnostics: result.diagnostics, projections: manifest.feedback.map(({ id, authored, current }) => ({ id, authored, current })), scope: 'Isolated local feedback ZIP, authored context, current range projection, scene descriptions and annotated still pixels. No video is exported; no external AI or browser interaction is used. Scene descriptions are explicit fixture input, not generated recognition.' };
+  const report = { checkedAt: new Date().toISOString(), sourcePath, sourceHash, sourcePreserved: true, versionsPreserved: true, statePreserved: true, fetchCalls: networkCalls, codeHashes, archivePath: result.archivePath, manifestPath: result.manifestPath, markdownPath: result.markdownPath, unpacked, archiveEntries, commentCount: result.commentCount, sceneCount: result.sceneCount, annotatedChecks, textChecks, diagnostics: result.diagnostics, projections: manifest.feedback.map(({ id, authored, current }) => ({ id, authored, current })), scope: 'Isolated local feedback ZIP, authored context, current range projection, scene descriptions and annotated still pixels. No video is exported; no external AI or browser interaction is used. Scene descriptions are explicit fixture input, not generated recognition.' };
   await writeFile(join(directory, 'report.json'), JSON.stringify(report, null, 2) + '\n');
   return report;
+}
+
+/** Format v2: schema, one-line-per-feedback JSONL, WebVTT cues, per-feedback sheets, version overview and drawing sentences. */
+async function verifyTextOutputs({ result, manifest, markdown, archiveEntries, unpacked, deletedId }) {
+  const { validateHandoffManifest } = await import('./handoff-schema.mjs');
+  await validateHandoffManifest(manifest);
+  for (const name of ['feedback.jsonl', 'feedback.vtt']) { assert.ok(archiveEntries.includes(name), `ZIP omitted ${name}`); assert.equal(await readFile(join(unpacked, name), 'utf8'), await readFile(join(result.directory, name), 'utf8')); }
+  const lines = (await readFile(result.jsonlPath, 'utf8')).trim().split('\n').map(line => JSON.parse(line));
+  assert.equal(lines[0].type, 'handoff'); assert.equal(lines[0].target.durationFrames, manifest.targetVersion.durationFrames); assert.equal(lines.length, manifest.feedback.length + 1);
+  manifest.feedback.forEach((entry, index) => {
+    const line = lines[index + 1];
+    assert.equal(line.type, 'feedback'); assert.equal(line.n, index + 1); assert.equal(entry.number, index + 1); assert.equal(line.id, entry.id);
+    assert.equal(line.feedback, entry.feedback.original); assert.deepEqual(line.supplements, entry.feedback.supplements.map(item => item.text));
+    assert.equal(line.scene?.text ?? '', entry.sceneDescription.text); assert.equal(line.images.sheet, entry.sheet.file);
+    assert.equal(line.drawings.length, entry.drawings.length); for (const drawing of line.drawings) { assert.match(drawing.where, /화면 .+ · 가로 \d+–\d+%, 세로 \d+–\d+%/); assert.equal(drawing.box.length, 4); }
+    assert.ok(entry.drawingProjection.every(item => markdown.includes(item.description)), 'Drawing sentences belong in the reading document.');
+    assert.equal(entry.sheet.cells.length, entry.scenes.length); assert.equal(entry.sheet.cells[0].frame, entry.authored.contextFrame);
+    assert.equal(entry.sheet.cells.filter(cell => cell.annotated).length, entry.scenes.filter(scene => scene.annotatedFile).length);
+  });
+  const sheetSizes = [];
+  for (const entry of manifest.feedback) { const metadata = await sharp(join(unpacked, entry.sheet.file)).metadata(); assert.equal(metadata.width, entry.sheet.width); assert.equal(metadata.height, entry.sheet.height); sheetSizes.push(metadata.size); }
+  const grid = await sharp(join(unpacked, manifest.overview.grid.file)).metadata(); assert.equal(grid.width, manifest.overview.grid.width); assert.equal(grid.height, manifest.overview.grid.height);
+  const shots = manifest.overview.shots.list; assert.equal(shots[0].frameIn, 0); assert.equal(shots.at(-1).frameOut, manifest.targetVersion.durationFrames); assert.ok(shots.every((shot, index) => !index || shot.frameIn === shots[index - 1].frameOut));
+  const vtt = await readFile(result.vttPath, 'utf8');
+  assert.ok(vtt.startsWith('WEBVTT')); assert.ok(!/\n\n\n/.test(vtt));
+  const cues = [...vtt.matchAll(/^(feedback-\d+(?:-\d+)?)\n(\d{2}:\d{2}:\d{2}\.\d{3}) --> (\d{2}:\d{2}:\d{2}\.\d{3})$/gm)].map(match => ({ id: match[1], start: match[2], end: match[3] }));
+  const placed = manifest.feedback.filter(entry => entry.current.ranges.length);
+  assert.equal(cues.length, placed.reduce((sum, entry) => sum + entry.current.ranges.length, 0));
+  const deletedEntry = manifest.feedback.find(entry => entry.id === deletedId); assert.ok(!cues.some(cue => cue.id === `feedback-${deletedEntry.number}`)); assert.match(vtt, new RegExp(`NOTE[\\s\\S]*\\[${deletedEntry.number}\\] 작성 v1`));
+  return { jsonlLines: lines.length, vttCues: cues, sheetBytes: sheetSizes, overviewShots: shots.length, schema: 'schema/feedback-handoff.schema.json' };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

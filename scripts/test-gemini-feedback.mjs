@@ -6,24 +6,30 @@ import { prepareGeminiFeedback, analyzeGeminiFeedback } from '../apps/worker/gem
 const help = `Gemini로 시간별 피드백 자료를 읽는 작은 테스트입니다.
 기본 실행은 로컬 자료 검사만 합니다. --live에서만 Gemini를 호출합니다.
 
-npm run test:gemini -- /path/to/manifest.json [--comment-id ID] [--live]
-  --comment-id ID    지정한 피드백만 검사 (여러 번 지정 가능, 최대 3개)
-  --output PATH      결과 폴더의 상위 경로 (기본 storage/qa/gemini-feedback)
-  --live             검증한 글·스틸·그림·참고 이미지를 Gemini에 한 번 전송
+npm run test:gemini -- /path/to/manifest.json [--comment-id ID] [--detail auto|sheet|full] [--include-transcripts] [--live]
+  --comment-id ID         지정한 피드백만 검사 (여러 번 지정 가능, 최대 3개)
+  --detail MODE           이미지 단계. auto(기본): 형식 v2면 피드백당 한 장 요약, 아니면 전체 스틸
+                          sheet: 한 장 요약만 · full: 모든 스틸과 그림 표시 스틸
+  --include-transcripts   미리 실행한 로컬 받아쓰기 글을 함께 전송 (음성 파일은 보내지 않음)
+  --output PATH           결과 폴더의 상위 경로 (기본 storage/qa/gemini-feedback)
+  --live                  검증한 글·이미지를 Gemini에 한 번 전송하고 observations.json을 남김
+
+observations.json은 피드백 내보내기 CLI의 --observations로 붙일 수 있습니다.
 
 키와 모델은 .env.local의 GEMINI_API_KEY / GEMINI_MODEL을 사용합니다.
 영상 파일·음성 파일은 보내지 않으며 앱의 원문·승인·버전은 바꾸지 않습니다.`;
 
 function options(args) {
-  const result = { live: false, commentIds: [], output: 'storage/qa/gemini-feedback' };
+  const result = { live: false, commentIds: [], output: 'storage/qa/gemini-feedback', detail: 'auto', includeTranscripts: false };
   for (let index = 0; index < args.length; index++) {
     const arg = args[index];
     if (arg === '--help' || arg === '-h') return { help: true };
     if (arg === '--live') result.live = true;
-    else if (arg === '--comment-id' || arg === '--output') {
+    else if (arg === '--include-transcripts') result.includeTranscripts = true;
+    else if (arg === '--comment-id' || arg === '--output' || arg === '--detail') {
       const value = args[++index];
       if (!value || value.startsWith('--')) throw new Error(`${arg} 값을 지정해 주세요.`);
-      if (arg === '--comment-id') result.commentIds.push(value); else result.output = value;
+      if (arg === '--comment-id') result.commentIds.push(value); else if (arg === '--detail') result.detail = value; else result.output = value;
     } else if (arg.startsWith('-') || result.manifest) throw new Error('실행 인자를 확인해 주세요. --help에서 사용법을 볼 수 있습니다.');
     else result.manifest = arg;
   }
@@ -57,7 +63,7 @@ async function main() {
   const info = await stat(manifestPath);
   if (!info.isFile() || info.size > 32 * 1024 * 1024) throw new Error('32 MiB 이하의 피드백 manifest.json 파일이 필요합니다.');
   const original = await readFile(manifestPath);
-  const prepared = await prepareGeminiFeedback(manifestPath, input.commentIds.length ? { commentIds: input.commentIds } : {});
+  const prepared = await prepareGeminiFeedback(manifestPath, { ...(input.commentIds.length ? { commentIds: input.commentIds } : {}), detail: input.detail, includeTranscripts: input.includeTranscripts });
   const model = process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite';
   const parent = resolve(input.output); await mkdir(parent, { recursive: true });
   const directory = await mkdtemp(join(parent, input.live ? 'live-' : 'dry-run-'));
@@ -75,6 +81,9 @@ async function main() {
       report.modelCalled = true;
       report.responseValidated = true;
       await writeFile(join(directory, 'review.md'), markdown(report.result));
+      // Model observations stay a separate file; the export CLI attaches them only when asked, labelled as model output.
+      const observations = { kind: 'video-feedback-observations', schemaVersion: 1, provider: 'gemini', model, createdAt: report.createdAt, sourceManifestSha256: report.inputManifestSha256, imageDetail: prepared.summary.imageDetail, items: report.result.feedback.map(item => ({ id: item.id, entryDigest: item.entryDigest, ...item.analysis })) };
+      await writeFile(join(directory, 'observations.json'), JSON.stringify(observations, null, 2));
     }
     report.inputManifestPreserved = original.equals(await readFile(manifestPath));
     if (!report.inputManifestPreserved) throw new Error('검사 도중 원본 manifest가 변경되었습니다. 결과를 다시 검토해 주세요.');
@@ -87,7 +96,7 @@ async function main() {
   } finally {
     report.elapsedMs = Math.round(performance.now() - started);
     await writeFile(join(directory, 'report.json'), JSON.stringify(report, null, 2));
-    process.stdout.write(JSON.stringify({ status: report.status, model, commentCount: prepared.summary.commentCount, imageCount: prepared.summary.imageCount, report: join(directory, 'report.json'), ...(report.modelCalled ? { review: join(directory, 'review.md') } : {}), ...(report.error ? { error: report.error } : {}) }) + '\n');
+    process.stdout.write(JSON.stringify({ status: report.status, model, commentCount: prepared.summary.commentCount, imageCount: prepared.summary.imageCount, report: join(directory, 'report.json'), imageDetail: prepared.summary.imageDetail, ...(report.modelCalled ? { review: join(directory, 'review.md'), observations: join(directory, 'observations.json') } : {}), ...(report.error ? { error: report.error } : {}) }) + '\n');
   }
 }
 
