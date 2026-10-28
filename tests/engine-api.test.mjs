@@ -733,6 +733,21 @@ await test('feedback edit, trash and restore preserve materials, invalidate appr
   const upload = async (role, name, body) => { const response = await fetch(`${base}/api/attachments`, { method: 'POST', headers: { 'x-file-name': name, 'x-asset-role': role }, body }); assert.equal(response.status, 201); return response.json(); };
   const image = await upload('reference', 'reference.png', await sharp({ create: { width: 40, height: 40, channels: 4, background: '#FFFF00' } }).png().toBuffer());
   const voice = await upload('voice', 'voice.mp4', bytes);
+  // Picked voice files (not only browser recordings) are normalized to AAC like recordings.
+  for (const name of ['memo.wav', 'memo.m4a']) {
+    const audioPath = join(storage, name); await run(ffmpegPath, ['-y', '-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'sine=frequency=330:duration=1', audioPath]);
+    const attached = await upload('voice', name, await readFile(audioPath));
+    assert.equal(attached.mimeType, 'audio/mp4'); assert.equal((await fetch(`${base}${attached.mediaUrl}`)).headers.get('content-type'), 'audio/mp4');
+  }
+  // Review markers are per-version bookmarks; repeated presses on one frame keep one marker.
+  const marker = (await request('/api/markers', 'POST', { versionId, frame: 30 })).value;
+  assert.equal(marker.frame, 30); assert.equal((await request('/api/markers', 'POST', { versionId, frame: 30 })).value.id, marker.id);
+  for (const body of [{ versionId, frame: -1 }, { versionId, frame: 1.5 }, { versionId, frame: 90 }, { versionId, frame: 1, text: 'x' }]) assert.equal((await request('/api/markers', 'POST', body)).status, 400);
+  assert.equal((await request('/api/markers', 'POST', { versionId: 'missing', frame: 1 })).status, 404);
+  assert.deepEqual((await request('/api/state')).value.markers, [marker]);
+  assert.equal((await request(`/api/markers/${marker.id}`, 'DELETE')).status, 200);
+  assert.equal((await request(`/api/markers/${marker.id}`, 'DELETE')).status, 404);
+  assert.deepEqual((await request('/api/state')).value.markers, []);
   const drawing = { id: 'saved-drawing', kind: 'rect', color: '#FFFF00', points: [{ x: 0.1, y: 0.1 }, { x: 0.4, y: 0.4 }], frame: 15 };
   const original = (await request('/api/comments', 'POST', { versionId, frameIn: 10, frameOut: 40, contextFrame: 15, category: 'subtitle', text: '2배속', sceneDescription: '첫 장면', drawings: [drawing], attachmentIds: [image.id], voiceAssetId: voice.id })).value;
   assert.equal((await request('/api/comments', 'POST', { versionId, frameIn: 0, text: '잘못된 분야', category: 'unknown' })).status, 400);

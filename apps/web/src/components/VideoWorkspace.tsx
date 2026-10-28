@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useImperativeHandle, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, Ref } from 'react';
-import { ChevronDown, ChevronUp, Hand, Maximize, Minimize, Minus, MessageSquarePlus, Pause, Pencil, Play, Plus, Repeat2, SkipBack, SkipForward, Volume2, VolumeX, X } from 'lucide-react';
-import type { Asset, Attachment, Comment, Drawing, Version } from '../../../../packages/core/types';
+import { Bookmark, ChevronDown, ChevronUp, Hand, Maximize, Minimize, Minus, MessageSquarePlus, Pause, Pencil, Play, Plus, Repeat2, SkipBack, SkipForward, Volume2, VolumeX, X } from 'lucide-react';
+import type { Asset, Attachment, Comment, Drawing, ReviewMarker, Version } from '../../../../packages/core/types';
+import { adjacentMarkerFrame, markerAt, markerLoopRange } from '../../../../packages/core/review-markers.mjs';
 import { mapFrameBetweenVersions, projectComment } from '../../../../packages/core/comment-projection.mjs';
 import { createRangePlaybackController } from '../../../../packages/core/range-playback.mjs';
 import type { PlaybackCommand } from '../../../../packages/core/range-playback.mjs';
@@ -11,7 +12,7 @@ import { OverlayEditor } from './OverlayEditor';
 import { ImagePlacementOverlay } from './ImagePlacementOverlay';
 import type { ImageOverlayPreview } from './ImagePlacementOverlay';
 import { TimelineFilmstrip } from './TimelineFilmstrip';
-import { TimelineMarkers, TimelineSavedRanges, type FeedbackMarker } from './TimelineMarkers';
+import { TimelineMarkers, TimelineReviewMarkers, TimelineSavedRanges, type FeedbackMarker } from './TimelineMarkers';
 import { TimelineSelection } from './TimelineSelection';
 import { TimelineDetails } from './TimelineDetails';
 import { TimelineSeekSurface } from './TimelineSeekSurface';
@@ -25,6 +26,7 @@ import './DirectingLayout.css';
 
 const FPS = 30;
 const EMPTY_ATTACHMENTS: Attachment[] = [];
+const EMPTY_MARKERS: ReviewMarker[] = [];
 const SIMPLE_TIMELINE_KEY = 'interference.timeline-simple.v1';
 const COMPACT_TIMELINE_KEY = 'interference.timeline-compact.v1';
 const PLAYBACK_RATES = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4];
@@ -77,13 +79,17 @@ export interface VideoWorkspaceProps {
   drawingHistoryKey?: string;
   onDrawingHistoryChange?: (available: boolean) => void;
   onSelectComment?: (comment: Comment, rangeIndex?: number, focusFrame?: number) => void;
+  reviewMarkers?: ReviewMarker[];
+  onToggleMarker?: (frame: number) => void;
+  /** Returns false when the app cannot take the range, so the loop stays off. */
+  onLoopMarkers?: (range: Range) => boolean;
 }
 
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
 }
 
-export function VideoWorkspace({ version, versions, asset, comments, attachments = EMPTY_ATTACHMENTS, selectedCommentId, selectedRangeIndex = 0, currentFrame, focusFrameToken, playbackRef, onFrameChange, range, rangeAvailable = true, rangeActive = true, onRangeClear, onRangeStart, canCompose = true, composeLabel = '선택 구간에 피드백', onRangeChange, drawings, onDrawingsChange, onCompose, compareVersion, onInsertDrawings, onDrawingCreate, imageOverlay, annotationsReadOnly = false, editingLocked = false, editingLockLabel, annotationFrame, drawingHistoryKey, onDrawingHistoryChange, onSelectComment }: VideoWorkspaceProps) {
+export function VideoWorkspace({ version, versions, asset, comments, attachments = EMPTY_ATTACHMENTS, reviewMarkers = EMPTY_MARKERS, onToggleMarker, onLoopMarkers, selectedCommentId, selectedRangeIndex = 0, currentFrame, focusFrameToken, playbackRef, onFrameChange, range, rangeAvailable = true, rangeActive = true, onRangeClear, onRangeStart, canCompose = true, composeLabel = '선택 구간에 피드백', onRangeChange, drawings, onDrawingsChange, onCompose, compareVersion, onInsertDrawings, onDrawingCreate, imageOverlay, annotationsReadOnly = false, editingLocked = false, editingLockLabel, annotationFrame, drawingHistoryKey, onDrawingHistoryChange, onSelectComment }: VideoWorkspaceProps) {
   const [compactTimeline, setCompactTimeline] = useState(readCompactTimeline);
   const [simpleTimeline, setSimpleTimeline] = useState(readSimpleTimeline);
   const [compactToolsOpen, setCompactToolsOpen] = useState(false);
@@ -96,6 +102,7 @@ export function VideoWorkspace({ version, versions, asset, comments, attachments
   const compareRef = useRef<HTMLVideoElement>(null);
   const surfaceRef = useRef<HTMLDivElement>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
+  const playheadRef = useRef<HTMLDivElement>(null);
   const lastEmittedFrame = useRef<number | null>(null);
   const currentFrameRef = useRef(currentFrame);
   const pointerDragRef = useRef<TimelineDrag | null>(null);
@@ -278,10 +285,13 @@ export function VideoWorkspace({ version, versions, asset, comments, attachments
     if (!video || !playing) return;
     let disposed = false, handle: number | null = null;
     const nativeFrames = typeof video.requestVideoFrameCallback === 'function';
+    // App state follows timeupdate (~4/s); the playhead alone follows every presented frame without a React render.
     const tick = () => {
       handle = null;
       if (disposed || !playback.playingRequested || video.paused) return;
-      samplePlayback(); schedule();
+      samplePlayback();
+      if (playheadRef.current) playheadRef.current.style.left = `${playback.frameAt(video.currentTime) / durationFrames * 100}%`;
+      schedule();
     };
     const schedule = () => {
       if (disposed || !playback.playingRequested || video.paused) return;
@@ -292,7 +302,7 @@ export function VideoWorkspace({ version, versions, asset, comments, attachments
       disposed = true;
       if (handle !== null) { if (nativeFrames) video.cancelVideoFrameCallback(handle); else cancelAnimationFrame(handle); }
     };
-  }, [playing, version.id, version.mediaUrl, playback, samplePlayback]);
+  }, [playing, version.id, version.mediaUrl, playback, samplePlayback, durationFrames]);
 
   useEffect(() => () => { playAttempt.current++; playback.requestPause(); }, [playback]);
 
@@ -357,8 +367,8 @@ export function VideoWorkspace({ version, versions, asset, comments, attachments
     if (videoRef.current && videoRef.current.readyState >= 1) videoRef.current.currentTime = next / FPS;
     onFrameChange(next);
   }, [durationFrames, onFrameChange, pauseVideo, editingLocked]);
-  const markerActionsRef = useRef({ editingLocked, onSelectComment, seekFrame });
-  markerActionsRef.current = { editingLocked, onSelectComment, seekFrame };
+  const markerActionsRef = useRef({ editingLocked, onSelectComment, seekFrame, onToggleMarker });
+  markerActionsRef.current = { editingLocked, onSelectComment, seekFrame, onToggleMarker };
   const selectMarker = useCallback((marker: FeedbackMarker) => {
     const actions = markerActionsRef.current;
     if (actions.editingLocked) return;
@@ -366,6 +376,7 @@ export function VideoWorkspace({ version, versions, asset, comments, attachments
     else actions.seekFrame(marker.frame);
   }, []);
   const seekTimeline = useCallback((next: number) => markerActionsRef.current.seekFrame(next), []);
+  const removeMarker = useCallback((markerFrame: number) => { if (!markerActionsRef.current.editingLocked) markerActionsRef.current.onToggleMarker?.(markerFrame); }, []);
   const commentsById = useMemo(() => new Map(comments.map(comment => [comment.id, comment])), [comments]);
   const selectDetail = useCallback((commentId: string, rangeIndex?: number, focusFrame?: number) => {
     const actions = markerActionsRef.current;
@@ -375,12 +386,30 @@ export function VideoWorkspace({ version, versions, asset, comments, attachments
     else if (focusFrame !== undefined) actions.seekFrame(focusFrame);
   }, [commentsById]);
 
+  const versionMarkers = useMemo(() => reviewMarkers.filter(marker => marker.versionId === version.id), [reviewMarkers, version.id]);
+  const markerHere = Boolean(markerAt(versionMarkers, frame));
+  const markerLoop = onLoopMarkers ? markerLoopRange(versionMarkers, frame, durationFrames) : null;
+  const markerLoopActive = Boolean(markerLoop && loopRange && hasActiveRange && safeIn === markerLoop.in && safeOut === markerLoop.out);
+  function toggleMarker() {
+    if (editingLocked || !onToggleMarker) return;
+    onToggleMarker(pauseAndReadFrame());
+  }
+  function seekMarker(direction: -1 | 1) {
+    const next = adjacentMarkerFrame(versionMarkers, currentFrameRef.current, direction);
+    if (next !== null) seekFrame(next);
+  }
+  function loopMarkers() {
+    if (editingLocked || !onLoopMarkers) return;
+    const next = markerLoopRange(versionMarkers, pauseAndReadFrame(), durationFrames);
+    if (next && onLoopMarkers(next)) setLoopRange(true);
+  }
+
   const markRange = useCallback((edge: 'in' | 'out') => {
     if (editingLocked || annotationsReadOnly) return;
     const next = markTimelineRange({ edge, frame: pauseAndReadFrame(), durationFrames, range: { in: safeIn, out: safeOut }, active: hasActiveRange });
     if (next) onRangeChange(next);
   }, [editingLocked, annotationsReadOnly, pauseAndReadFrame, durationFrames, safeIn, safeOut, hasActiveRange, onRangeChange]);
-  const keyboardActions = { frame, seekFrame, togglePlayback, markRange, onCompose: composeFromViewer, editingLocked, annotationsReadOnly: annotationsReadOnly || editingLocked, durationFrames, stepPlaybackRate, toggleFullscreen, previewZoom: preview.zoom, previewReset: preview.reset, toggleHand: preview.toggleHand, timecodeRef };
+  const keyboardActions = { frame, seekFrame, togglePlayback, markRange, onCompose: composeFromViewer, editingLocked, annotationsReadOnly: annotationsReadOnly || editingLocked, durationFrames, stepPlaybackRate, toggleFullscreen, previewZoom: preview.zoom, previewReset: preview.reset, toggleHand: preview.toggleHand, timecodeRef, toggleMarker, seekMarker };
   const keyboardActionsRef = useRef(keyboardActions);
   keyboardActionsRef.current = keyboardActions;
 
@@ -406,6 +435,8 @@ export function VideoWorkspace({ version, versions, asset, comments, attachments
       else if (key === '+' || key === '=' || key === '-') { event.preventDefault(); actions.previewZoom(key === '-' ? -1 : 1); }
       else if (key === '0') { event.preventDefault(); actions.previewReset(); }
       else if (key === 'h') { event.preventDefault(); actions.toggleHand(); }
+      else if (key === 'b') { event.preventDefault(); actions.toggleMarker(); }
+      else if (key === ',' || key === '.') { event.preventDefault(); actions.seekMarker(key === '.' ? 1 : -1); }
       else if (key === 'i' && !actions.annotationsReadOnly) {
         event.preventDefault(); actions.markRange('in');
       } else if (event.key.toLowerCase() === 'o' && !actions.annotationsReadOnly) {
@@ -558,6 +589,8 @@ export function VideoWorkspace({ version, versions, asset, comments, attachments
         </div>
         <div className="vi-player-tools">
           {hasActiveRange ? <button className={`vi-loop-button${loopRange && hasActiveRange ? ' active' : ''}`} disabled={!hasActiveRange || editingLocked || mediaError} aria-pressed={loopRange && hasActiveRange} onClick={() => setLoopRange(enabled => !enabled)} title={hasActiveRange ? '보기용 IN–OUT 반복. 재생 버튼을 누르면 구간 밖에서는 IN부터 시작하며, 멈춘 상태에서는 자동 재생하지 않습니다.' : '구간을 지정하면 반복 재생할 수 있습니다.'}><Repeat2 size={15} />구간 반복</button> : null}
+          {onToggleMarker ? <button className={`vi-loop-button vi-marker-button${markerHere ? ' active' : ''}`} disabled={editingLocked || mediaError} aria-pressed={markerHere} onClick={toggleMarker} title="검수 마커 찍기 / 지우기 (B) · 이전 / 다음 마커 ( , / . )"><Bookmark size={15} />{markerHere ? '마커 지우기' : '마커'}</button> : null}
+          {markerLoop ? <button className={`vi-loop-button${markerLoopActive ? ' active' : ''}`} disabled={editingLocked || mediaError} aria-pressed={markerLoopActive} onClick={loopMarkers} title={`${timecode(markerLoop.in)}–${timecode(markerLoop.out)} 보기용 반복 · 다음 마커가 없으면 영상 끝까지. 선택 구간도 이 범위로 바뀝니다.`}><Repeat2 size={15} />다음 마커까지 반복</button> : null}
           <label className="vi-playback-speed"><span>보기</span><select aria-label="보기 배속 — 출력 영상에는 적용되지 않음" title="미리보기 재생 배속 ([ / ]). 출력 영상에는 적용되지 않습니다." value={playbackRate} onChange={event => changePlaybackRate(Number(event.target.value))}>{PLAYBACK_RATES.map(rate => <option key={rate} value={rate}>{rate}×</option>)}</select></label>
           {!compactTimeline ? <button className="vi-dock-icon vi-pan-tool" disabled={preview.rect.zoom <= 1} aria-pressed={preview.hand && preview.rect.zoom > 1} onClick={preview.toggleHand} aria-label="확대한 영상 이동" title="이동 도구 (H) · 마우스 가운데 버튼으로도 이동"><Hand size={16}/></button> : null}
         </div>
@@ -589,7 +622,8 @@ export function VideoWorkspace({ version, versions, asset, comments, attachments
           <TimelineFilmstrip version={version} enabled={!compactTimeline && !simpleTimeline} />
           <TimelineSavedRanges markers={markers} durationFrames={durationFrames} activeKey={hasActiveRange && annotationsReadOnly && selectedCommentId ? `${selectedCommentId}-${selectedRangeIndex}` : null}/>
           {hasActiveRange ? <div className="vi-range-selection" data-readonly={annotationsReadOnly} style={{ left: `${safeIn / durationFrames * 100}%`, width: `${(safeOut - safeIn) / durationFrames * 100}%` }} /> : null}
-          <div className="vi-playhead" style={{ left: `${frame / durationFrames * 100}%` }}><span /></div>
+          <TimelineReviewMarkers markers={versionMarkers} durationFrames={durationFrames} activeFrame={markerHere ? frame : null} disabled={editingLocked} onSeek={seekTimeline} onRemove={removeMarker}/>
+          <div ref={playheadRef} className="vi-playhead" style={{ left: `${frame / durationFrames * 100}%` }}><span /></div>
           {hasActiveRange && annotationsReadOnly ? <><span className="vi-range-boundary vi-range-in" aria-hidden="true" style={{ left: `${safeIn / durationFrames * 100}%` }}/><span className="vi-range-boundary vi-range-out" aria-hidden="true" style={{ left: `${safeOut / durationFrames * 100}%` }}/></> : hasActiveRange ? <><button disabled={editingLocked} className="vi-range-handle vi-range-in" style={{ left: `${safeIn / durationFrames * 100}%` }} role="slider" aria-label="구간 시작 IN" aria-valuemin={0} aria-valuemax={safeOut - 1} aria-valuenow={safeIn} aria-valuetext={`${timecode(safeIn)}, ${safeIn} 프레임`} title="IN · 드래그 또는 방향키로 조절"
             onPointerDown={(event) => dragTimeline(event, 'in')} onPointerMove={updateTimeline} onPointerUp={finishTimelineDrag} onPointerCancel={endTimelineDrag} onLostPointerCapture={endTimelineDrag} onKeyDown={(event) => rangeKey(event, 'in')} />
           <button disabled={editingLocked} className="vi-range-handle vi-range-out" style={{ left: `${safeOut / durationFrames * 100}%` }} role="slider" aria-label="구간 끝 OUT" aria-valuemin={safeIn + 1} aria-valuemax={durationFrames} aria-valuenow={safeOut} aria-valuetext={`${timecode(safeOut)}, ${safeOut} 프레임`} title="OUT · 드래그 또는 방향키로 조절"
@@ -606,7 +640,7 @@ export function VideoWorkspace({ version, versions, asset, comments, attachments
         <span className="vi-drawing-contract">그림은 시간별 피드백에 함께 저장됩니다.</span>
         <button className="vi-compose-button" disabled={editingLocked || !canCompose} onClick={() => void composeFromViewer()} title="현재 시점이나 선택 구간에 피드백 작성 (C)"><Plus size={16} />{composeLabel}</button>
       </div>
-      <div className="vi-shortcut-note"><span><kbd>Space</kbd> 재생</span><span><kbd>←</kbd><kbd>→</kbd> 프레임</span><span><kbd>I</kbd><kbd>O</kbd> 구간</span><span><kbd>C</kbd> 피드백</span><span className="vi-frame-precision">30 fps 기준 · OUT 제외</span></div>
+      <div className="vi-shortcut-note"><span><kbd>Space</kbd> 재생</span><span><kbd>←</kbd><kbd>→</kbd> 프레임</span><span><kbd>I</kbd><kbd>O</kbd> 구간</span><span><kbd>C</kbd> 피드백</span><span><kbd>B</kbd> 마커</span><span className="vi-frame-precision">30 fps 기준 · OUT 제외</span></div>
       </div>
       </VerticalWorkspaceLayout>
     </section>

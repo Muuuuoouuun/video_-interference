@@ -93,3 +93,17 @@
 @media (min-width: 1500px) { .vi-player-controls { padding-top: 16px; padding-bottom: 17px; } .vi-timeline { height: 76px; } }
 @media (max-width: 1180px) { .vi-player-controls { gap: 10px; } .vi-player-tools { gap: 6px; } .vi-tool { padding: 0 7px; } .vi-tool span { display: none; } .vi-transport { gap: 8px; } }
 @media (max-width: 700px) { .vi-player-controls { gap: 10px; } .vi-transport { width: 100%; justify-content: flex-start; } .vi-timecode { margin-left: auto; } .vi-player-tools { width: 100%; justify-content: space-between; } .vi-tool span { display: inline; } .vi-tools-divider { display: none; } .vi-tool { padding: 0 9px; } .vi-timeline { height: 56px; } .vi-range-fields { gap: 10px; } .vi-shortcut-note { gap: 8px; } .vi-shortcut-note .vi-frame-precision { display: none; } .vi-viewer-comparing { aspect-ratio: 8 / 9; flex-direction: column; } .vi-viewer-comparing .vi-video-surface, .vi-viewer-comparing .vi-compare-surface { width: 100%; height: 50%; } .vi-compare-surface { border-left: 0; border-top: 1px solid #2b3035; } }
+
+/* Review markers: thin flags, distinct from numbered feedback pins. Line and flag are drawn
+   by pseudo-elements so the hit target stays 11px wide without covering the filmstrip. */
+.vi-review-marker { --flag: #f5c451; position: absolute; top: 0; bottom: 0; z-index: 4; width: 11px; margin-left: -5px; padding: 0; border: 0; background: transparent; cursor: pointer; animation: vi-marker-drop .22s cubic-bezier(.2, .9, .3, 1.25) both; }
+.vi-review-marker::before { content: ''; position: absolute; top: 0; bottom: 0; left: 5px; width: 2px; background: var(--flag); box-shadow: 0 0 0 1px rgb(0 0 0 / 65%); transform-origin: top; transition: width .12s, box-shadow .15s; }
+.vi-review-marker::after { content: ''; position: absolute; top: 0; left: 5px; width: 10px; height: 10px; background: var(--flag); clip-path: polygon(0 0, 100% 0, 0 100%); filter: drop-shadow(0 0 1px #000); transform-origin: 0 0; transition: transform .14s cubic-bezier(.2, .9, .3, 1.3); }
+.vi-review-marker:hover:not(:disabled)::after, .vi-review-marker:focus-visible::after { transform: scale(1.35); }
+.vi-review-marker:hover:not(:disabled)::before { width: 3px; }
+.vi-review-marker.active::before { width: 3px; box-shadow: 0 0 0 1px rgb(0 0 0 / 65%), 0 0 8px 1px rgb(245 196 81 / 70%); }
+.vi-review-marker.active::after { transform: scale(1.35); }
+.vi-review-marker.pending { opacity: .6; }
+.vi-review-marker:focus-visible { outline: 2px solid var(--flag); outline-offset: 1px; }
+.vi-review-marker:disabled { cursor: default; opacity: .55; animation: none; }
+@keyframes vi-marker-drop { from { opacity: 0; transform: translateY(-6px) scaleY(.4); } to { opacity: 1; transform: none; } }
