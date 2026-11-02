@@ -10,3 +10,11 @@
 .feedback-category-select > select:focus-visible { outline: none; }
 .feedback-category-select > select:disabled { cursor: default; opacity: .6; }
 .feedback-category-label { display: inline-flex; align-items: center; gap: 4px; color: var(--pin-ink); font-size: 10px; font-weight: 500; }
+.feedback-category-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.feedback-category-chip { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 9px; border: 1px solid var(--border-strong, #d5d9e0); border-radius: 4px; background: var(--surface, #fff); color: var(--text-secondary, #4b5160); font-size: 11px; font-weight: 500; line-height: 1; cursor: pointer; }
+.feedback-category-chip .feedback-category-dot { opacity: .55; }
+.feedback-category-chip:hover:not(:disabled) { border-color: rgb(var(--pin-rgb) / 55%); color: var(--pin-ink); }
+.feedback-category-chip[aria-checked="true"] { border-color: rgb(var(--pin-rgb) / 60%); background: var(--pin-soft); color: var(--pin-ink); font-weight: 600; }
+.feedback-category-chip[aria-checked="true"] .feedback-category-dot { opacity: 1; }
+.feedback-category-chip:focus-visible { outline: 2px solid var(--pin-color); outline-offset: 1px; }
+.feedback-category-chip:disabled { cursor: default; opacity: .55; }
