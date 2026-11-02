@@ -375,3 +375,49 @@ textarea:focus-visible, select:focus-visible,
 .video-start-step-number, .video-start-steps strong svg { color: var(--accent); }
 .video-start-local { border-color: var(--border-strong); }
 .video-start-error { color: var(--danger); background: var(--danger-surface); border-color: #f0c9c5; }
+
+/* Compact density · 2026-11-02
+   Smaller controls and a shorter feedback box. Text sizes for comment bodies and input stay unchanged. */
+.composer { padding: 10px; }
+.composer .composer-context { gap: 5px; margin-bottom: 7px; }
+.composer .composer-context .composer-time-chip,
+.composer .composer-context .composer-range-chip { min-height: 24px; padding: 2px 6px; }
+.composer .composer-context .composer-time-chip > strong,
+.composer .composer-context .composer-range-chip > strong { font-size: 11px; }
+.composer-select-range { padding: 3px 2px; }
+.composer-category-row { margin: 0 0 6px; }
+.composer-drawing-context { margin: 0 0 6px; }
+/* Short by default; grows with the text where supported (field-sizing), otherwise scroll/resize as before. */
+.composer .composer-feedback-field > textarea { min-height: 64px; max-height: 200px; padding: 7px 10px; line-height: 1.55; field-sizing: content; }
+.composer-actions .primary { min-height: 30px; padding: 5px 12px; font-size: 12px; }
+.composer-options-toggle { padding: 4px 2px; }
+.composer-options { margin-top: 8px; padding-top: 8px; }
+.composer-options .composer-kind { margin-bottom: 7px; }
+.composer-scene-field { gap: 4px; margin: 6px 0 8px; }
+.composer-scene-field > input { padding: 6px 9px; }
+.composer-add-attachment { min-height: 28px; padding: 4px 8px; }
+.composer-input-hints { margin-top: 6px; }
+
+.request-panel .rq-panel-heading { margin-bottom: 10px; }
+.request-panel .rq-heading-title > h1 { font-size: 16px; }
+.request-panel .rq-filter-group { margin-bottom: 8px; padding: 2px; gap: 2px; }
+.request-panel .rq-filter-button { min-height: 26px; padding: 3px 6px; }
+.request-panel .rq-list-controls { gap: 6px; margin-bottom: 8px; }
+.request-panel .rq-search { height: 30px; padding: 0 9px; }
+.request-panel .rq-search button { width: 22px; height: 22px; }
+.request-panel .rq-sort { height: 28px; }
+.request-panel .rq-sort select { padding-left: 29px; }
+.request-panel .rq-navigation button { width: 28px; height: 28px; }
+.request-item { padding: 9px 10px; }
+.request-panel .request-text { margin-top: 6px; margin-bottom: 6px; line-height: 1.55; }
+.request-rail-tools { margin-bottom: 8px; }
+
+.vi-review-toolbar { gap: 8px; padding: 4px 0; }
+.vi-review-toolbar .vi-play-button { width: 30px; height: 28px; }
+.vi-review-toolbar .vi-playback-speed, .vi-loop-button { height: 28px; }
+.vi-icon-button, .vi-dock-icon, .vi-timeline-toggle { height: 28px; }
+.oe-tool, .vi-drawing-tools .oe-tool { height: 28px; }
+.feedback-compose-action { min-height: 28px; gap: 5px; padding: 0 8px; }
+.feedback-compose-action kbd { height: 17px; min-width: 15px; }
+.feedback-panel-toggle { width: 28px; height: 28px; }
+.feedback-category-select { padding: 1px 6px; }
