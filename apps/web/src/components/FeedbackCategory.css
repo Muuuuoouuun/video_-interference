@@ -3,7 +3,7 @@
 [data-feedback-category="audio"] { --pin-color: #43a493; --pin-ink: #226c60; --pin-soft: #e9f8f2; --pin-rgb: 67 164 147; }
 [data-feedback-category="effect"] { --pin-color: #9a79d6; --pin-ink: #6946a0; --pin-soft: #f3edff; --pin-rgb: 154 121 214; }
 [data-feedback-category="note"] { --pin-color: #d987a4; --pin-ink: #954762; --pin-soft: #fff0f5; --pin-rgb: 217 135 164; }
-.feedback-category-select { display: inline-flex; align-items: center; gap: 5px; width: fit-content; max-width: 100%; padding: 3px 6px; border: 1px solid rgb(var(--pin-rgb) / 30%); border-radius: 8px; background: var(--pin-soft); color: var(--pin-ink); }
+.feedback-category-select { display: inline-flex; align-items: center; gap: 5px; width: fit-content; max-width: 100%; padding: 3px 6px; border: 1px solid rgb(var(--pin-rgb) / 30%); border-radius: 6px; background: var(--pin-soft); color: var(--pin-ink); }
 .feedback-category-dot { width: 6px; height: 6px; flex-shrink: 0; border-radius: 50%; background: var(--pin-color); }
 .feedback-category-select > select { min-width: 0; max-width: 100%; padding: 2px 1px; border: 0; background: transparent; color: inherit; font: inherit; font-size: 11px; line-height: 1.4; cursor: pointer; }
 .feedback-category-select:focus-within { outline: 2px solid var(--pin-color); outline-offset: 2px; }

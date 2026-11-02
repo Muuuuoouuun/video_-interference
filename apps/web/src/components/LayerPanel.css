@@ -8,7 +8,7 @@
 .layer-load-error { font-size: 11px; line-height: 1.6; color: #d4aaa0; margin-top: 8px; }
 .layer-load-error .quiet { margin-top: 5px; font-size: 11px; }
 .layer-list { padding: 0 3px 0 0; list-style: none; margin: 10px 0 0; max-height: 210px; overflow: auto; scrollbar-width: thin; scrollbar-color: #364b3f transparent; }
-.layer-item { border: 1px solid #303d35; padding: 9px; border-radius: 5px; background: #17211b; }
+.layer-item { border: 1px solid #303d35; padding: 9px; border-radius: 4px; background: #17211b; }
 .layer-item + .layer-item { margin-top: 7px; }
 .layer-item-label { display: flex; align-items: center; gap: 6px; color: #b3c9bc; font-size: 10px; }
 .layer-item-label strong { font-weight: 550; }
@@ -20,14 +20,14 @@
 .layer-item-actions { display: flex; justify-content: flex-end; gap: 5px; margin-top: 5px; }
 .layer-item-actions .quiet { font-size: 10px; }
 .layer-pending-changes { display: flex; flex-direction: column; gap: 5px; margin-top: 8px; }
-.layer-pending-changes button { text-align: left; border: 1px solid #4c6e59; border-radius: 4px; background: #24392b; color: #b5d8c2; font-size: 10px; line-height: 1.6; padding: 5px 7px; }
+.layer-pending-changes button { text-align: left; border: 1px solid #4c6e59; border-radius: 3px; background: #24392b; color: #b5d8c2; font-size: 10px; line-height: 1.6; padding: 5px 7px; }
 .layer-pending-changes button > span { float: right; color: #91b69f; margin-left: 7px; }
-.layer-remove-confirm { padding: 8px; border: 1px solid #735d42; border-radius: 4px; margin-top: 7px; color: #cfb996; background: #2b241b; font-size: 11px; line-height: 1.6; }
+.layer-remove-confirm { padding: 8px; border: 1px solid #735d42; border-radius: 3px; margin-top: 7px; color: #cfb996; background: #2b241b; font-size: 11px; line-height: 1.6; }
 .layer-remove-confirm > div { display: flex; justify-content: flex-end; gap: 7px; margin-top: 7px; }
 .layer-remove-confirm .secondary, .layer-remove-confirm .quiet { min-height: 28px; font-size: 10px; padding: 5px 7px; }
 .layer-error { color: #f0aea3 !important; line-height: 1.6; }
 .layer-remove-confirm .layer-error { margin-top: 6px; }
-.layer-dialog { color: #e4eee8; background: #161d19; border: 1px solid #52695b; border-radius: 10px; padding: 0; width: min(1120px, calc(100vw - 64px)); max-width: none; max-height: calc(100dvh - 48px); overflow: auto; box-shadow: 0 24px 90px #0009; }
+.layer-dialog { color: #e4eee8; background: #161d19; border: 1px solid #52695b; border-radius: 6px; padding: 0; width: min(1120px, calc(100vw - 64px)); max-width: none; max-height: calc(100dvh - 48px); overflow: auto; box-shadow: 0 24px 90px #0009; }
 .layer-dialog::backdrop { background: #050b08c9; }
 .layer-dialog-header { display: flex; justify-content: space-between; align-items: center; padding: 20px 24px 10px; gap: 16px; }
 .layer-dialog-header span { display: block; font-size: 11px; color: #9ab3a4; margin-bottom: 6px; }
@@ -37,7 +37,7 @@
 .layer-reference-column { min-width: 0; }
 .layer-reference-caption { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; font-size: 10px; color: #96b2a2; margin-bottom: 8px; font-variant-numeric: tabular-nums; }
 .layer-reference-caption > span:last-child { color: #758b7f; }
-.layer-stage { position: relative; height: clamp(220px, 38vh, 420px); background: #080d0b; overflow: hidden; border: 1px solid #283b30; border-radius: 5px; }
+.layer-stage { position: relative; height: clamp(220px, 38vh, 420px); background: #080d0b; overflow: hidden; border: 1px solid #283b30; border-radius: 4px; }
 .layer-stage video { display: block; width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
 .layer-reference-note { font-size: 10px; line-height: 1.6; color: #8ba092; margin-top: 9px; }
 .layer-media-error { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; background: #121d17dd; color: #c5ac81; padding: 16px; text-align: center; font-size: 12px; }
@@ -53,17 +53,17 @@
 .layer-drawing-help { font-size: 10px; line-height: 1.6; color: #9bb5a5; margin-top: 7px; }
 .layer-fields { display: flex; flex-direction: column; gap: 17px; }
 .layer-field { display: flex; flex-direction: column; gap: 8px; color: #b1c8ba; font-size: 12px; }
-.layer-field textarea, .layer-field select { width: 100%; min-width: 0; border: 1px solid #42564a; border-radius: 4px; padding: 10px; color: #e0eee6; background: #0f1812; }
+.layer-field textarea, .layer-field select { width: 100%; min-width: 0; border: 1px solid #42564a; border-radius: 3px; padding: 10px; color: #e0eee6; background: #0f1812; }
 .layer-field textarea { resize: vertical; line-height: 1.6; min-height: 115px; }
 .layer-field > span { color: #859f8e; font-size: 10px; line-height: 1.6; }
 .layer-color-field { display: flex; align-items: center; gap: 9px; color: #b1c8ba; font-size: 12px; }
-.layer-color-field input { width: 36px; height: 28px; background: #1c2b22; border: 1px solid #465a4d; border-radius: 4px; padding: 2px; }
+.layer-color-field input { width: 36px; height: 28px; background: #1c2b22; border: 1px solid #465a4d; border-radius: 3px; padding: 2px; }
 .layer-color-field span { font-size: 11px; font-variant-numeric: tabular-nums; color: #879f90; }
-.layer-image-preview { display: block; width: 100%; height: 90px; object-fit: contain; background: #101912; border-radius: 4px; }
-.layer-region-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; border: 1px solid #334a3b; border-radius: 5px; padding: 12px; margin: 0; }
+.layer-image-preview { display: block; width: 100%; height: 90px; object-fit: contain; background: #101912; border-radius: 3px; }
+.layer-region-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; border: 1px solid #334a3b; border-radius: 4px; padding: 12px; margin: 0; }
 .layer-region-fields legend { color: #a7c1b0; font-size: 11px; padding: 0 5px; }
 .layer-region-fields label { font-size: 10px; color: #8fa997; }
-.layer-region-fields label > div { display: flex; align-items: center; gap: 4px; margin-top: 5px; border: 1px solid #3b5043; background: #101a13; border-radius: 4px; }
+.layer-region-fields label > div { display: flex; align-items: center; gap: 4px; margin-top: 5px; border: 1px solid #3b5043; background: #101a13; border-radius: 3px; }
 .layer-region-fields input { width: 100%; min-width: 0; border: 0; background: none; color: #dbe9df; padding: 7px; font-variant-numeric: tabular-nums; }
 .layer-region-fields label > div > span { color: #789381; padding-right: 7px; }
 .layer-dialog-footer { display: flex; align-items: center; justify-content: space-between; gap: 20px; border-top: 1px solid #33463a; padding: 16px 24px; background: #18271d; }

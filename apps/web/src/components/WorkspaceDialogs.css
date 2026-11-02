@@ -1,4 +1,4 @@
-.workspace-dialog { color: #e1eae5; width: min(650px, 92vw); max-height: 86dvh; padding: 0; border: 1px solid #415148; border-radius: 12px; background: #161d19; box-shadow: 0 24px 100px #0009; }
+.workspace-dialog { color: #e1eae5; width: min(650px, 92vw); max-height: 86dvh; padding: 0; border: 1px solid #415148; border-radius: 8px; background: #161d19; box-shadow: 0 24px 100px #0009; }
 .workspace-dialog::backdrop { background: #080c0bd0; }
 .workspace-dialog > header { display: flex; justify-content: space-between; align-items: center; padding: 20px 24px 14px; }
 .workspace-dialog h2 { display: flex; align-items: center; gap: 10px; font-size: 18px; font-weight: 600; }
@@ -10,7 +10,7 @@
 .shortcut-groups dl { margin: 0; }
 .shortcut-groups dl > div { display: flex; justify-content: space-between; align-items: center; gap: 20px; padding: 7px 0; font-size: 12px; border-bottom: 1px solid #253129; }
 .shortcut-groups dd { margin: 0; flex-shrink: 0; }
-.workspace-dialog kbd { font: inherit; font-size: 11px; border: 1px solid #3b4b40; background: #232e27; color: #c4d7cb; border-radius: 4px; padding: 3px 6px; }
+.workspace-dialog kbd { font: inherit; font-size: 11px; border: 1px solid #3b4b40; background: #232e27; color: #c4d7cb; border-radius: 3px; padding: 3px 6px; }
 .trash-items { padding: 0 24px 20px; }
 .trash-items article { display: flex; align-items: center; gap: 16px; padding: 16px 0; border-top: 1px solid #303c34; }
 .trash-items article > div { flex: 1; min-width: 0; }
