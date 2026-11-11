@@ -1,6 +1,6 @@
 # Local worker API
 
-Run `node apps/worker/server.mjs`. Node 25, FFmpeg, ffprobe and sharp are required. The worker binds to `127.0.0.1:4318`. Vite runs on port 4317 and proxies `/api` and `/media` to the worker. `PORT`, `VI_DEV_PORT`, `VI_STORAGE_ROOT`, `VI_SAMPLE_PATH`, `FFMPEG_PATH` and `FFPROBE_PATH` can override local defaults.
+Run `node apps/worker/server.mjs`. Node 25, FFmpeg, ffprobe and sharp are required. The worker binds to `127.0.0.1:4318`. Vite runs on port 4317 and proxies `/api` and `/media` to the worker. `PORT`, `VI_DEV_PORT`, `VI_STORAGE_ROOT`, `VI_SAMPLE_PATH`, `FFMPEG_PATH` and `FFPROBE_PATH` can override local defaults. Without an override the worker uses `/opt/homebrew/bin`, then `PATH`, then `/usr/local/bin` and `/usr/bin`.
 
 `GET /api/state` returns `BootstrapState` from `packages/core/types.ts`: a complete `AppState`, or `{empty:true, capabilities}` when no source is open. A missing sample does not prevent server startup; use `POST /api/assets` to initialize the workspace. Every frame range uses canonical 30 fps, with an exclusive out frame. Import keeps the uploaded source and creates a 30 fps proxy. Every render decodes that preserved source, rather than re-encoding a preceding output version. Versions retain immutable operation snapshots and source-to-output maps. A speed factor is absolute relative to source speed; the newest operation wins where speed or whole-track volume requests overlap. Cuts are additive; trim operations retain their intersection. Graphics in removed ranges disappear from output.
 

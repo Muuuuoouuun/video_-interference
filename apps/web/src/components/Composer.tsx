@@ -7,13 +7,24 @@ import { acquireMicrophone, stopMicrophone } from '../../../../packages/core/mic
 import { createPendingVoiceUpload, type PendingVoiceSession, type PendingVoiceUpload } from '../../../../packages/core/pending-voice-upload.mjs';
 import { drawingFrame, groupDrawings } from '../../../../packages/core/drawing-anchors.mjs';
 import { IMAGE_ATTACHMENT_LIMIT, commentAttachmentInput } from '../../../../packages/core/comment-attachments.mjs';
+import { COMPOSER_DRAFT_KEY, decodeComposerDraft, encodeComposerDraft, type ComposerDraft, type ComposerDraftAnchor } from '../../../../packages/core/composer-draft.mjs';
 import { AttachmentGallery } from './AttachmentGallery';
 import { FeedbackCategorySelect } from './FeedbackCategory';
 import './Composer.css';
 export interface RequestAnchor { in: number; out: number; contextFrame?: number; drawings?: Drawing[] }
 export interface RequestOptions { kind: 'request' | 'note'; category?: FeedbackCategory; interpretNow: boolean; sceneDescription?: string }
-interface Props { range: { in: number; out: number }; currentFrame:number; drawingContextFrame?: number; drawings: Drawing[]; busy: boolean; editingMode?: boolean; anchorMode?: 'point' | 'range'; onAnchorModeChange?: (mode: 'point' | 'range') => void; onClearRange?: () => void; onBeginWriting?: () => number | undefined; textareaRef: React.RefObject<HTMLTextAreaElement | null>; onSubmit: (text: string, attachmentIds: string[], voiceId?: string, anchor?: RequestAnchor, options?: RequestOptions) => Promise<void>; onError: (message: string) => void; onActivityChange?: (active: boolean) => void; onAnchorLockChange?: (locked: boolean) => void; onDraftChange?: (hasContent: boolean) => void }
-export function Composer({ range, currentFrame, drawingContextFrame, drawings, busy, editingMode = false, anchorMode = 'point', onAnchorModeChange, onClearRange, onBeginWriting, textareaRef, onSubmit, onError, onActivityChange, onAnchorLockChange, onDraftChange }: Props) {
+interface Props { range: { in: number; out: number }; currentFrame:number; drawingContextFrame?: number; drawings: Drawing[]; busy: boolean; editingMode?: boolean; anchorMode?: 'point' | 'range'; onAnchorModeChange?: (mode: 'point' | 'range') => void; onClearRange?: () => void; onBeginWriting?: () => number | undefined; textareaRef: React.RefObject<HTMLTextAreaElement | null>; onSubmit: (text: string, attachmentIds: string[], voiceId?: string, anchor?: RequestAnchor, options?: RequestOptions) => Promise<void>; onError: (message: string) => void; onActivityChange?: (active: boolean) => void; onAnchorLockChange?: (locked: boolean) => void; onDraftChange?: (hasContent: boolean) => void; draftVersionId?: string; durationFrames?: number; onRestoreDraft?: (anchor: ComposerDraftAnchor) => boolean }
+function readStoredDraft(versionId?: string, durationFrames?: number): ComposerDraft | null {
+  if (!versionId) return null;
+  try { return decodeComposerDraft(window.localStorage.getItem(COMPOSER_DRAFT_KEY), versionId, durationFrames); } catch { return null; }
+}
+function writeStoredDraft(raw: string | null) {
+  try { if (raw) window.localStorage.setItem(COMPOSER_DRAFT_KEY, raw); else window.localStorage.removeItem(COMPOSER_DRAFT_KEY); } catch { /* Drafts still work in memory without storage. */ }
+}
+export function Composer({ range, currentFrame, drawingContextFrame, drawings, busy, editingMode = false, anchorMode = 'point', onAnchorModeChange, onClearRange, onBeginWriting, textareaRef, onSubmit, onError, onActivityChange, onAnchorLockChange, onDraftChange, draftVersionId, durationFrames, onRestoreDraft }: Props) {
+  // A typed draft survives reloads and crashes. Recovery is offered, never applied silently, so the anchor stays explicit.
+  const [recovery, setRecovery] = useState<ComposerDraft | null>(() => readStoredDraft(draftVersionId, durationFrames));
+  const lastStoredDraft = useRef<string | null | undefined>(null);
   const [optionsOpen, setOptionsOpen] = useState(false);
   const optionsId = useId();
   const [text, setText] = useState('');
@@ -63,6 +74,23 @@ export function Composer({ range, currentFrame, drawingContextFrame, drawings, b
   const fallbackDrawingFrame = drawingContextFrame ?? currentFrame;
   const drawingGroups = useMemo(() => groupDrawings(drawings, fallbackDrawingFrame), [drawings, fallbackDrawingFrame]);
   useEffect(() => { onDraftChange?.(hasDraft); }, [hasDraft, onDraftChange]);
+  const storedAnchor: ComposerDraftAnchor = { mode: displayPoint ? 'point' : 'range', in: displayedRange.in, out: displayedRange.out, contextFrame: displayedContextFrame };
+  const storedDraft = draftVersionId ? encodeComposerDraft({ versionId: draftVersionId, text, sceneDescription, kind, category, anchor: storedAnchor, savedAt: null }) : null;
+  useEffect(() => {
+    // Keep an unresolved recovery offer intact until the user restores or discards it.
+    if (recovery || !draftVersionId || storedDraft === lastStoredDraft.current) return;
+    lastStoredDraft.current = storedDraft;
+    writeStoredDraft(storedDraft && JSON.stringify({ ...JSON.parse(storedDraft), savedAt: new Date().toISOString() }));
+  }, [storedDraft, recovery, draftVersionId]);
+  function restoreDraft() {
+    if (!recovery || hasDraft || anchorLocked) return;
+    if (onRestoreDraft && !onRestoreDraft(recovery.anchor)) return;
+    setText(recovery.text); setSceneDescription(recovery.sceneDescription); setKind(recovery.kind); setCategory(recovery.category);
+    if (recovery.sceneDescription.trim()) setOptionsOpen(true);
+    setRecovery(null);
+    requestAnimationFrame(() => textareaRef.current?.focus());
+  }
+  function discardDraft() { setRecovery(null); lastStoredDraft.current = undefined; writeStoredDraft(null); }
   useEffect(() => { if (!editingMode) setInterpretNow(false); }, [editingMode]);
   useEffect(() => { onActivityChange?.(recording || requestingMicrophone || uploading || saving); }, [recording, requestingMicrophone, uploading, saving, onActivityChange]);
   useEffect(() => { onAnchorLockChange?.(hasVoice || Boolean(pendingVoice)); }, [hasVoice, pendingVoice, onAnchorLockChange]);
@@ -116,7 +144,7 @@ export function Composer({ range, currentFrame, drawingContextFrame, drawings, b
     if (!canSubmit || busy || uploading || recording || requestingMicrophone || submitting.current || voiceUpload.current?.pending) return;
     submitting.current = true;
     setSaving(true);
-    try { const { attachmentIds, voiceAssetId } = commentAttachmentInput(attachments); await onSubmit(text.trim(), attachmentIds, voiceAssetId, voiceAssetId ? voiceAnchor.current : captureAnchor(), {kind,category:kind === 'note' ? undefined : category,interpretNow:editingMode && kind === 'request' && interpretNow,sceneDescription:sceneDescription.trim() || undefined}); setText(''); setSceneDescription(''); setAttachments([]); setOptionsOpen(false); setKind('request'); setInterpretNow(false); setRole('reference'); voiceAnchor.current = undefined; } catch { /* Keep the description, feedback and attachments available for retry. */ } finally { submitting.current = false; if (mounted.current) setSaving(false); }
+    try { const { attachmentIds, voiceAssetId } = commentAttachmentInput(attachments); await onSubmit(text.trim(), attachmentIds, voiceAssetId, voiceAssetId ? voiceAnchor.current : captureAnchor(), {kind,category:kind === 'note' ? undefined : category,interpretNow:editingMode && kind === 'request' && interpretNow,sceneDescription:sceneDescription.trim() || undefined}); lastStoredDraft.current = null; writeStoredDraft(null); setText(''); setSceneDescription(''); setAttachments([]); setOptionsOpen(false); setKind('request'); setInterpretNow(false); setRole('reference'); voiceAnchor.current = undefined; } catch { /* Keep the description, feedback and attachments available for retry. */ } finally { submitting.current = false; if (mounted.current) setSaving(false); }
   }
   return <div className="composer-wrap"><form className={`composer${draggingImage ? ' composer-dragging' : ''}`}
     onPaste={event => { const images = Array.from(event.clipboardData.files).filter(file => file.type.startsWith('image/')); if (images.length) { event.preventDefault(); void attachFiles(images); } }}
@@ -126,6 +154,7 @@ export function Composer({ range, currentFrame, drawingContextFrame, drawings, b
     onDrop={event => { if (!event.dataTransfer.types.includes('Files')) return; event.preventDefault(); dragDepth.current = 0; setDraggingImage(false); void attachFiles(Array.from(event.dataTransfer.files)); }}
     onSubmit={e => { e.preventDefault(); void submit(); }}>
     <input hidden type="file" multiple accept="image/png,image/jpeg,image/webp" ref={inputRef} onChange={event => { const files = Array.from(event.target.files ?? []); if (files.length) void attachFiles(files); event.target.value = ''; }}/>
+    {recovery ? <div className="composer-recovery" role="status"><p><strong>저장하지 않은 {recovery.kind === 'note' ? '메모' : '피드백'} 초안이 있습니다</strong><span>{recovery.anchor.mode === 'range' ? `${time(recovery.anchor.in)}–${time(recovery.anchor.out)}` : time(recovery.anchor.contextFrame)} · “{(recovery.text || recovery.sceneDescription).trim().slice(0, 40)}{(recovery.text || recovery.sceneDescription).trim().length > 40 ? '…' : ''}”</span><small>글과 시점만 복구합니다. 그림·이미지·음성은 다시 추가해 주세요.</small></p><div><button type="button" className="secondary" disabled={hasDraft || anchorLocked} title={hasDraft ? '지금 작성 중인 내용을 저장하거나 비운 뒤 복구할 수 있습니다.' : '초안을 작성 시점으로 복구'} onClick={restoreDraft}>복구</button><button type="button" className="quiet" disabled={saving} onClick={discardDraft}>버리기</button></div></div> : null}
     <div className="composer-context">
       <span className="composer-time-chip"><Clock3 size={13} aria-hidden="true"/><span className="composer-anchor-label">{hasVoice || pendingVoice ? '음성 기준' : '현재 시점'}</span><strong>{time(displayPoint ? displayedRange.in : displayedContextFrame)}</strong></span>
       {!displayPoint ? <span className="composer-range-chip" title="선택 구간 · 끝 시점은 포함하지 않음"><Brackets size={13} aria-hidden="true"/><span className="composer-anchor-label">구간</span><strong>{time(displayedRange.in)}<span className="composer-time-separator">–</span>{time(displayedRange.out)}</strong><button type="button" aria-label="선택 구간 해제" title="구간을 해제하고 현재 시점에 남기기" disabled={anchorLocked || !onClearRange && !onAnchorModeChange} onClick={() => onClearRange ? onClearRange() : onAnchorModeChange?.('point')}><X size={13}/></button></span> : <button type="button" className="composer-select-range" disabled={anchorLocked || !onAnchorModeChange} onClick={() => onAnchorModeChange?.('range')}>구간 지정</button>}

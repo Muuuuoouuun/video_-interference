@@ -1,12 +1,23 @@
 import { spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, writeFile, access, stat, rename } from 'node:fs/promises';
-import { join, dirname } from 'node:path';
+import { existsSync } from 'node:fs';
+import { join, dirname, delimiter } from 'node:path';
 import { drawingsSvg, assertStaticDrawingFrames } from './drawings.mjs';
 
 export const FPS = 30;
-export const ffmpegPath = process.env.FFMPEG_PATH || '/opt/homebrew/bin/ffmpeg';
-export const ffprobePath = process.env.FFPROBE_PATH || '/opt/homebrew/bin/ffprobe';
+
+/** Resolve a native media binary: explicit env override → PATH → common install locations (Homebrew first for the original macOS setup). */
+export function resolveMediaBinary(name, override, { pathEnv = process.env.PATH || '', fallbacks = ['/opt/homebrew/bin', '/usr/local/bin', '/usr/bin'], exists = existsSync } = {}) {
+  if (override) return override;
+  for (const directory of [...fallbacks.slice(0, 1), ...pathEnv.split(delimiter).filter(Boolean), ...fallbacks.slice(1)]) {
+    const candidate = join(directory, name);
+    if (exists(candidate)) return candidate;
+  }
+  return name;
+}
+export const ffmpegPath = resolveMediaBinary('ffmpeg', process.env.FFMPEG_PATH);
+export const ffprobePath = resolveMediaBinary('ffprobe', process.env.FFPROBE_PATH);
 
 const canceledError = () => Object.assign(new Error('렌더를 취소했습니다.'), { name: 'AbortError' });
 const checkCancellation = signal => { if (signal?.aborted) throw canceledError(); };

@@ -14,6 +14,7 @@ import { RequestPanel } from './components/RequestPanel';
 import type { PreparedContextBundle } from './components/RequestPanel';
 import { Composer } from './components/Composer';
 import type { RequestAnchor, RequestOptions } from './components/Composer';
+import type { ComposerDraftAnchor } from '../../../packages/core/composer-draft.mjs';
 import { VideoWorkspace } from './components/VideoWorkspace';
 import { ResizableWorkspace } from './components/ResizableWorkspace';
 import { VideoStart } from './components/VideoStart';
@@ -126,6 +127,14 @@ export function App() {
   const approved = data?.ops.filter(op => op.status === 'approved' && op.type !== 'note' && op.versionId === version?.id) ?? [];
   const rendering = job?.status === 'running' || job?.status === 'queued';
   const draftLocked = busy || loadingFile || composerActive || voiceAnchorLocked || layerDraftOpen;
+  const unsavedWork = draftPending || supplementDraft || layerDraftOpen || composerActive;
+  useEffect(() => {
+    // Typed composer text is recoverable locally; drawings, uploads, recordings and card edits are not, so warn before leaving.
+    if (!unsavedWork) return;
+    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [unsavedWork]);
   const mutate = useCallback(async (action: () => Promise<unknown>) => {
     setBusy(true); setError('');
     try {
@@ -281,6 +290,16 @@ export function App() {
     if (focus) requestAnimationFrame(() => textareaRef.current?.focus());
     return plan.frame;
   }, [version, busy, loadingFile, composerActive, layerDraftOpen, selectedComment, draftReturnable, range, feedbackAnchorMode, resetDrawingHistory]);
+  const restoreDraftAnchor = useCallback((anchor: ComposerDraftAnchor) => {
+    if (!version || draftLocked || drawings.length) return false;
+    const last = Math.max(0, version.durationFrames - 1), clamp = (frame: number) => Math.max(0, Math.min(last, frame));
+    const frameIn = clamp(anchor.in), frameOut = Math.max(frameIn + 1, Math.min(version.durationFrames, anchor.out)), frame = clamp(anchor.contextFrame);
+    workspacePlaybackRef.current?.pauseAndReadFrame();
+    setSelectedId(null); setPreviewOpId(null); setFeedbackPanelOpen(true);
+    setRange({ in: frameIn, out: frameOut }); setFeedbackAnchorMode(anchor.mode === 'range' && frameOut - frameIn > 1 ? 'range' : 'point');
+    drawingContext.current = frame; draftFrame.current = frame; setCurrentFrame(frame); setFocusFrameToken(token => token + 1);
+    return true;
+  }, [version, draftLocked, drawings.length]);
   const toggleFeedbackPanel = useCallback(() => {
     const open = !feedbackPanelOpen;
     setFeedbackPanelOpen(open);
@@ -388,7 +407,7 @@ export function App() {
       <aside className="request-rail" aria-label="댓글 패널">
         {!feedbackPanelOpen ? <div className="request-rail-tools"><button ref={feedbackExpandRef} type="button" className="rail-collapse-toggle feedback-panel-toggle" aria-label="댓글 패널 펼치기" aria-expanded={false} aria-controls="feedback-panel-content" disabled={composerActive || layerDraftOpen} title="댓글 패널 펼치기" onClick={toggleFeedbackPanel}><PanelRightOpen size={18}/></button></div> : null}
         <div id="feedback-panel-content" className="request-rail-content" hidden={!feedbackPanelOpen}>{editingMode ? <LayerPanel version={version} originalVersion={data.versions.find(item => item.parentVersionId === null) ?? data.versions[0]} asset={data.asset} attachments={data.attachments} busy={busy || loadingFile || composerActive || Boolean(rendering)} onChange={onLayerChange} onDraftChange={setLayerDraftOpen} pendingChanges={data.ops} onSelectChange={op => { const comment = data.comments.find(item => item.id === op.commentId); if (comment) { selectComment(comment); setFeedbackRevealToken(value => value + 1); } }} onSeek={frame => { if (!selectedComment) draftFrame.current = frame; setCurrentFrame(frame); setFocusFrameToken(token => token + 1); }}/> : null}<RequestPanel headerActions={feedbackHeaderActions} keyboardEnabled={feedbackPanelOpen} editingMode={editingMode} revealToken={feedbackRevealToken} comments={data.comments} versions={data.versions} currentVersion={version} onSelectAuthored={selectAuthored} onDraftChange={setSupplementDraft} ops={data.ops} selectedId={selectedId} busy={busy || !!rendering || loadingFile || composerActive || layerDraftOpen} onSelect={selectComment} onOp={onOp} onInterpret={onInterpret} onPrepareContextBundle={onPrepareContextBundle} onSupplement={onSupplement} onEditComment={onEditComment} onDeleteComment={onDeleteComment} attachments={data.attachments} previewOpId={previewOpId} onPreviewOverlay={previewOverlay}/>{selectedComment ? <details className="saved-context-details" key={selectedComment.id}><summary>선택한 댓글 · 구간·마크업 재사용</summary><SavedRequestContext comment={selectedComment} projection={projection} drawingGroups={savedDrawingGroups} deletedDrawingCount={drawingProjections.filter(item => item.status === 'deleted').length} unavailableDrawingCount={drawingProjections.filter(item => item.status === 'unavailable').length} currentVersionNumber={version.number} selectedRangeIndex={selectedRangeIndex} hasDraft={draftPending} hasDrawingHistory={drawingHistoryAvailable} busy={busy || loadingFile || composerActive || layerDraftOpen} onRangeSelect={index => selectComment(selectedComment, index, true)} onCompose={composeFromSaved}/></details> : null}
-        <Composer onBeginWriting={() => selectedComment ? composeAtPlayhead(false) : workspacePlaybackRef.current?.pauseAndReadFrame()} anchorMode={selectedComment && !draftReturnable ? 'point' : feedbackAnchorMode} onAnchorModeChange={changeAnchorMode} onClearRange={() => changeAnchorMode('point')} editingMode={editingMode} key={version.id} range={range} currentFrame={selectedComment && draftReturnable ? draftFrame.current : currentFrame} drawingContextFrame={drawingContext.current} drawings={drawings} busy={busy || loadingFile || layerDraftOpen} textareaRef={textareaRef} onSubmit={onSubmit} onError={setError} onActivityChange={setComposerActive} onAnchorLockChange={setVoiceAnchorLocked} onDraftChange={setDraftContent}/>
+        <Composer onBeginWriting={() => selectedComment ? composeAtPlayhead(false) : workspacePlaybackRef.current?.pauseAndReadFrame()} anchorMode={selectedComment && !draftReturnable ? 'point' : feedbackAnchorMode} onAnchorModeChange={changeAnchorMode} onClearRange={() => changeAnchorMode('point')} editingMode={editingMode} key={version.id} range={range} currentFrame={selectedComment && draftReturnable ? draftFrame.current : currentFrame} drawingContextFrame={drawingContext.current} drawings={drawings} busy={busy || loadingFile || layerDraftOpen} textareaRef={textareaRef} onSubmit={onSubmit} onError={setError} onActivityChange={setComposerActive} onAnchorLockChange={setVoiceAnchorLocked} onDraftChange={setDraftContent} draftVersionId={version.id} durationFrames={version.durationFrames} onRestoreDraft={restoreDraftAnchor}/>
         <div className="interpreter-note"><Info size={14}/><span>{editingMode ? data.capabilities.interpreterLabel : '타임코드와 마크업을 댓글에 함께 저장합니다.'}</span></div></div></aside>
     </ResizableWorkspace>
     <footer className="status-bar"><div><ShieldCheck size={17}/>원본 보존<button className="quiet shortcut-trigger" title="단축키 (?)" onClick={() => setShortcutsOpen(true)}><Keyboard size={15}/>단축키</button></div><div>{rendering ? <><span className="render-progress"><span style={{ width: `${job?.progress ?? 0}%` }}/></span>새 버전 렌더 중</> : <><span>피드백·메모 {data.comments.length}개</span>{editingMode ? <span>승인 {approved.length}개</span> : <span>로컬 자료 준비</span>}</>}</div></footer>
