@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 const children = [
-  spawn(process.execPath, ['apps/worker/server.mjs'], { stdio: 'inherit' }),
+  spawn(process.execPath, ['--env-file-if-exists=.env.vertex.local', 'apps/worker/server.mjs'], { stdio: 'inherit' }),
   spawn(process.execPath, ['node_modules/vite/bin/vite.js', '--config', 'apps/web/vite.config.ts'], { stdio: 'inherit' })
 ];
 let shuttingDown = false;

@@ -6,7 +6,7 @@ import { mkdtemp, readFile, readdir, stat, rm, writeFile, access, chmod } from '
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ffmpegPath, run } from '../apps/worker/engine.mjs';
+import { ffmpegPath, ffprobePath, run } from '../apps/worker/engine.mjs';
 import sharp from 'sharp';
 import { DatabaseSync } from 'node:sqlite';
 import { createHash } from 'node:crypto';
@@ -699,7 +699,7 @@ await test('feedback handoff exports authored scenes, annotations and portable a
   const names = (await run('/usr/bin/unzip', ['-Z1', archive])).trim().split('\n'); assert.ok(names.includes('feedback.md') && names.includes('manifest.json')); assert.equal(names.length, manifest.files.length + 2); assert.ok(names.every(name => !name.startsWith('/') && !name.includes('..') && !/\.(mp4|mov|webm|mkv|avi)$/i.test(name)));
   const unpacked = join(storage, 'unpacked'); await run('/usr/bin/unzip', ['-q', archive, '-d', unpacked]);
   const audio = manifest.files.find(file => file.mimeType === 'audio/mp4'); assert.ok(audio);
-  const voiceInfo = JSON.parse(await run('/opt/homebrew/bin/ffprobe', ['-v', 'error', '-show_streams', '-of', 'json', join(unpacked, audio.path)])); assert.ok(voiceInfo.streams.every(stream => stream.codec_type === 'audio'), 'a video uploaded as a voice memo exports audio only');
+  const voiceInfo = JSON.parse(await run(ffprobePath, ['-v', 'error', '-show_streams', '-of', 'json', join(unpacked, audio.path)])); assert.ok(voiceInfo.streams.every(stream => stream.codec_type === 'audio'), 'a video uploaded as a voice memo exports audio only');
   for (const file of manifest.files) assert.equal(createHash('sha256').update(await readFile(join(unpacked, file.path))).digest('hex'), file.sha256);
   const newer = await request('/api/feedback-exports', 'POST', exportBody); assert.equal(newer.status, 200); assert.notEqual(newer.value.archiveUrl, first.value.archiveUrl); assert.equal(await countCalls(), 2);
   const newerManifest = await (await fetch(`${base}${newer.value.manifestUrl}`)).json(); assert.equal(newerManifest.feedback.find(entry => entry.id === feedback.id).feedback.supplements[0].text, '자료 준비 이후 추가한 설명');

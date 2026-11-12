@@ -20,6 +20,9 @@ import { VideoStart } from './components/VideoStart';
 import type { VideoWorkspaceHandle } from './components/VideoWorkspace';
 import { ShortcutDialog, FeedbackTrashDialog } from './components/WorkspaceDialogs';
 import { SavedRequestContext } from './components/SavedRequestContext';
+import { VertexImageDialog } from './components/VertexImageDialog';
+import { VertexAudioDialog } from './components/VertexAudioDialog';
+import { VertexVideoDialog } from './components/VertexVideoDialog';
 import type { ImageOverlayPreview } from './components/ImagePlacementOverlay';
 import './components/RequestContext.css';
 
@@ -31,6 +34,9 @@ export function App() {
   const [feedbackPanelOpen, setFeedbackPanelOpen] = useState(true);
   const [feedbackAnchorMode, setFeedbackAnchorMode] = useState<'point'|'range'>('point');
   const [exportOpen, setExportOpen] = useState(false);
+  const [vertexImageOpen, setVertexImageOpen] = useState(false);
+  const [vertexAudioOpen, setVertexAudioOpen] = useState(false);
+  const [vertexVideoOpen, setVertexVideoOpen] = useState(false);
   const [premiereOpen, setPremiereOpen] = useState(false);
   const [premiereResult, setPremiereResult] = useState<PremiereExportResult | null>(null);
   const [premiereError, setPremiereError] = useState('');
@@ -364,13 +370,16 @@ export function App() {
     try { await upload('/api/assets', file, file.name); setData(null); setEmpty(false); initialized.current = false; const imported = await load(); if ('empty' in imported) return; setCurrentFrame(0); setRange({ in: 0, out: 1 }); setSelectedId(null); setDrawings([]); resetDrawingHistory(); setPreviewOpId(null); setCompare(false); setFeedbackAnchorMode('point'); setExportResult(null); setNotice('영상을 가져왔습니다. 구간을 선택하고 요청을 남겨보세요.'); } catch (e) { setError((e as Error).message); } finally { setLoadingFile(false); }
   }
   const previous = data?.versions.find(v => v.id === version?.parentVersionId) ?? data?.versions.find(v => v.id !== version?.id && v.status === 'ready');
-  if (empty) return <VideoStart busy={loadingFile} error={error} onImport={importFile} onError={setError}/>;
+  if (empty) return <><VideoStart busy={loadingFile} error={error} onImport={importFile} onError={setError} onGenerate={() => setVertexImageOpen(true)} onGenerateAudio={() => setVertexAudioOpen(true)} onGenerateVideo={() => setVertexVideoOpen(true)}/><VertexImageDialog open={vertexImageOpen} onClose={() => setVertexImageOpen(false)}/><VertexAudioDialog open={vertexAudioOpen} onClose={() => setVertexAudioOpen(false)}/><VertexVideoDialog open={vertexVideoOpen} onClose={() => setVertexVideoOpen(false)}/></>;
   if (!data || !version) return <div className="boot"><span className="wordmark">INTERFERENCE</span><LoaderCircle className="spinning"/><p>{error || '로컬 영상을 준비하고 있습니다.'}</p>{error ? <button className="primary" onClick={() => void load().catch(e => setError((e as Error).message))}>다시 연결</button> : null}</div>;
   return <div className="app-shell">
     <header className="app-header">
       <div className="brand-block"><span className="wordmark">INTERFERENCE</span></div>
       <div className="breadcrumb"><span>시간별 피드백</span><span>/</span><span title={data.project.name}>{data.project.name}</span></div>
       <div className="header-actions">
+        <button className="secondary" onClick={() => setVertexImageOpen(true)}>AI 이미지 생성</button>
+        <button className="secondary" onClick={() => setVertexAudioOpen(true)}>AI 음성 생성</button>
+        <button className="secondary" onClick={() => setVertexVideoOpen(true)}>AI 영상 생성</button>
         <input type="file" accept="video/*" hidden ref={fileRef} onChange={e => { const file = e.target.files?.[0]; if (file) void importFile(file); e.target.value = ''; }}/>
         <details className="workspace-more"><summary aria-label="추가 작업 옵션"><MoreHorizontal size={18}/><span>더 보기</span></summary><div><button className="quiet" aria-pressed={editingMode} disabled={busy || loadingFile || composerActive || layerDraftOpen || rendering} onClick={() => { setEditingMode(value => !value); setPreviewOpId(null); setCompare(false); }} title="명령 해석·승인·영상 렌더 기능 표시">{editingMode ? '편집 기능 닫기' : '편집 기능'}</button><button className="quiet" disabled={busy || loadingFile || composerActive || rendering || draftPending || supplementDraft || layerDraftOpen} onClick={event => { event.currentTarget.closest('details')?.removeAttribute('open'); void exportPremiere(); }} title="영상 없이 댓글·시간·투명 마크업을 Premiere로 전달">Premiere 연동</button></div></details>
         <button className="secondary" onClick={() => fileRef.current?.click()} disabled={loadingFile || rendering || busy || composerActive || draftPending || supplementDraft || layerDraftOpen}>{loadingFile ? <LoaderCircle size={16} className="spinning"/> : <FolderOpen size={16}/>}영상 열기</button>
@@ -395,6 +404,9 @@ export function App() {
     <ShortcutDialog open={shortcutsOpen} onClose={() => setShortcutsOpen(false)}/>
     <FeedbackTrashDialog open={trashOpen} comments={data.deletedComments ?? []} busy={busy || loadingFile || !!rendering} onClose={() => setTrashOpen(false)} onRestore={onRestoreComment}/>
     <FeedbackExportDialog open={exportOpen} busy={busy && exportInFlight.current} result={exportResult} error={exportError} onClose={() => { if (!exportInFlight.current) setExportOpen(false); }} onRetry={() => void exportFeedback()}/>
+    <VertexImageDialog open={vertexImageOpen} onClose={() => setVertexImageOpen(false)}/>
+    <VertexAudioDialog open={vertexAudioOpen} onClose={() => setVertexAudioOpen(false)}/>
+    <VertexVideoDialog open={vertexVideoOpen} onClose={() => setVertexVideoOpen(false)}/>
     <PremiereExportDialog open={premiereOpen} busy={busy && premiereInFlight.current} result={premiereResult} error={premiereError} onClose={() => { if (!premiereInFlight.current) setPremiereOpen(false); }} onRetry={() => void exportPremiere()}/>
     {error ? <div className="feedback error" role="alert"><span>{error}</span><button className="quiet" onClick={() => void load().then(() => setError('')).catch(e => setError((e as Error).message))}>다시 연결</button><button onClick={() => setError('')} aria-label="오류 메시지 닫기"><X size={16}/></button></div> : null}
     {notice ? <div className="feedback notice" role="status"><span>{notice}</span>{undoDeleteId && notice === '피드백을 휴지통으로 옮겼습니다.' ? <button className="feedback-undo" disabled={busy} onClick={() => void onRestoreComment(undoDeleteId)}><RotateCcw size={14}/>되돌리기</button> : null}<button onClick={() => setNotice('')} aria-label="알림 닫기"><X size={16}/></button></div> : null}

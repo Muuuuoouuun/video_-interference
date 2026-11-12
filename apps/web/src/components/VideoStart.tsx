@@ -7,12 +7,15 @@ interface Props {
   error: string;
   onImport: (file: File) => Promise<void>;
   onError: (message: string) => void;
+  onGenerate?: () => void;
+  onGenerateAudio?: () => void;
+  onGenerateVideo?: () => void;
 }
 
 const videoExtension = /\.(mp4|mov|webm|mkv|m4v)$/i;
 
 /** First-run surface only; the parent owns project creation and media validation. */
-export function VideoStart({ busy, error, onImport, onError }: Props) {
+export function VideoStart({ busy, error, onImport, onError, onGenerate, onGenerateAudio, onGenerateVideo }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const importingRef = useRef(false);
   const dragDepth = useRef(0);
@@ -37,7 +40,7 @@ export function VideoStart({ busy, error, onImport, onError }: Props) {
   }
 
   return <div className="video-start">
-    <header className="video-start-header"><span className="wordmark">INTERFERENCE</span><span><ShieldCheck size={15}/>개인 작업 공간</span></header>
+    <header className="video-start-header"><span className="wordmark">INTERFERENCE</span><span><ShieldCheck size={15}/>개인 작업 공간</span>{onGenerate ? <button className="secondary" onClick={onGenerate}>AI 이미지 생성</button> : null}{onGenerateAudio ? <button className="secondary" onClick={onGenerateAudio}>AI 음성 생성</button> : null}{onGenerateVideo ? <button className="secondary" onClick={onGenerateVideo}>AI 영상 생성</button> : null}</header>
     <main className="video-start-main">
       <div className="video-start-intro"><h1>장면에 피드백을 남기세요</h1><p>바꾸고 싶은 순간을 짚고, 글과 그림으로 설명하세요.<br/>시간·장면·요청을 함께 담은 전달 자료로 정리합니다.</p></div>
       <section className={`video-start-dropzone${dragging && !unavailable ? ' video-start-dragging' : ''}`} aria-label="첫 영상 열기" aria-busy={unavailable}

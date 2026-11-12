@@ -195,15 +195,26 @@ function validateResponse(response, entries) {
 }
 
 /** Explicit single-call Gemini analysis. No application state, approvals, exports, or videos are written. */
-export async function analyzeGeminiFeedback(prepared, { apiKey, model = 'gemini-3.5-flash-lite', fetchImpl = fetch, signal } = {}) {
-  if (typeof apiKey !== 'string' || !apiKey.trim() || apiKey.length > 512 || /[\r\n]/.test(apiKey)) throw fail('MISSING_API_KEY', '유효한 Gemini API 키가 설정되지 않았습니다.');
+export async function analyzeGeminiFeedback(prepared, { apiKey, vertex, model = 'gemini-3.5-flash-lite', fetchImpl = fetch, signal } = {}) {
+  let url, headers;
+  if (vertex !== undefined) {
+    if (!record(vertex) || typeof vertex.project !== 'string' || !/^[a-z][a-z0-9-]{4,28}[a-z0-9]$/.test(vertex.project) || typeof vertex.location !== 'string' || !/^(?:global|[a-z]+(?:-[a-z]+)+[0-9])$/.test(vertex.location)) throw fail('INVALID_VERTEX_CONFIG', 'Vertex 프로젝트 ID 또는 리전 설정을 확인해 주세요.');
+    if (typeof vertex.accessToken !== 'string' || !/^[\x21-\x7e]{1,8192}$/.test(vertex.accessToken)) throw fail('MISSING_VERTEX_TOKEN', 'Vertex의 유효한 단기 액세스 토큰이 필요합니다.');
+    const host = vertex.location === 'global' ? 'aiplatform.googleapis.com' : `${vertex.location}-aiplatform.googleapis.com`;
+    url = `https://${host}/v1beta1/projects/${vertex.project}/locations/${vertex.location}/publishers/google/models/${model}:generateContent`;
+    headers = { 'content-type': 'application/json', authorization: `Bearer ${vertex.accessToken}` };
+  } else {
+    if (typeof apiKey !== 'string' || !apiKey.trim() || apiKey.length > 512 || /[\r\n]/.test(apiKey)) throw fail('MISSING_API_KEY', '유효한 Gemini API 키가 설정되지 않았습니다.');
+    url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+    headers = { 'content-type': 'application/json', 'x-goog-api-key': apiKey.trim() };
+  }
   if (typeof model !== 'string' || !/^gemini-[a-zA-Z0-9][a-zA-Z0-9._-]{0,99}$/.test(model)) throw fail('INVALID_MODEL', 'Gemini 모델 이름이 유효하지 않습니다.');
   if (!preparedRequests.has(prepared)) throw fail('INVALID_PREPARED_REQUEST', '검증한 로컬 피드백 자료를 먼저 준비해 주세요.');
   const deadline = AbortSignal.timeout(60_000), combinedSignal = signal ? AbortSignal.any([signal, deadline]) : deadline;
   let result;
   try {
     combinedSignal.throwIfAborted();
-    const response = await fetchImpl(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-goog-api-key': apiKey.trim() }, body: JSON.stringify(prepared.request), redirect: 'error', signal: combinedSignal });
+    const response = await fetchImpl(url, { method: 'POST', headers, body: JSON.stringify(prepared.request), redirect: 'error', signal: combinedSignal });
     if (!response.ok) {
       await response.body?.cancel().catch(() => {});
       const status = Number.isInteger(response.status) && response.status >= 100 && response.status <= 599 ? response.status : 'unknown';
@@ -218,5 +229,5 @@ export async function analyzeGeminiFeedback(prepared, { apiKey, model = 'gemini-
   }
   const analysis = validateResponse(result, prepared.entries), usageMetadata = {};
   for (const key of ['promptTokenCount', 'candidatesTokenCount', 'totalTokenCount', 'cachedContentTokenCount', 'thoughtsTokenCount']) if (Number.isSafeInteger(result.usageMetadata?.[key]) && result.usageMetadata[key] >= 0) usageMetadata[key] = result.usageMetadata[key];
-  return { provider: 'gemini', model, modelCalled: true, networkUsed: true, sourceVideoIncluded: false, renderedVideoIncluded: false, transcriptionPerformed: false, usageMetadata, feedback: prepared.entries.map(entry => ({ id: entry.id, kind: entry.kind, authored: structuredClone(entry.authored), current: structuredClone(entry.current), originalFeedback: structuredClone(entry.feedback), sceneDescription: structuredClone(entry.sceneDescription), analysis: analysis.get(entry.id) })) };
+  return { provider: vertex === undefined ? 'gemini' : 'vertex', model, modelCalled: true, networkUsed: true, sourceVideoIncluded: false, renderedVideoIncluded: false, transcriptionPerformed: false, usageMetadata, feedback: prepared.entries.map(entry => ({ id: entry.id, kind: entry.kind, authored: structuredClone(entry.authored), current: structuredClone(entry.current), originalFeedback: structuredClone(entry.feedback), sceneDescription: structuredClone(entry.sceneDescription), analysis: analysis.get(entry.id) })) };
 }
