@@ -103,7 +103,12 @@ export async function ingest(sourcePath, previewPath, thumbnailPath) {
   const audioOffsetSeconds = audioOffsetFromInfo(info);
   const args = ['-y', '-hide_banner', '-loglevel', 'error', '-i', sourcePath, '-map', '0:v:0', '-map', '0:a:0?', '-vf', "setpts=PTS-STARTPTS,fps=30,scale=w='min(1920,iw)':h='min(1080,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1", '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p', '-g', '15', '-movflags', '+faststart'];
   if (hasAudio) args.push('-af', `${alignedAudio(audioOffsetSeconds)},apad`, '-c:a', 'aac', '-ar', '48000', '-ac', '2', '-shortest');
-  args.push('-t', String(duration), previewPath);
+  // Trust the decoder's actual end of video, not the container's reported
+  // duration: some MOV/FFmpeg combinations report only the last frame PTS,
+  // which is one frame short and would truncate that frame with `-t`.
+  // With audio, `-shortest` above stops the padded track at video EOF.
+  // Keep a fixed hard ceiling even if input metadata understates its length.
+  args.push('-t', '600', previewPath);
   await run(ffmpegPath, args);
   const normalized = await probe(previewPath);
   const canonical = normalized.streams.find(stream => stream.codec_type === 'video');
