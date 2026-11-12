@@ -6,20 +6,23 @@ import { prepareGeminiFeedback, analyzeGeminiFeedback } from '../apps/worker/gem
 const help = `Gemini로 시간별 피드백 자료를 읽는 작은 테스트입니다.
 기본 실행은 로컬 자료 검사만 합니다. --live에서만 Gemini를 호출합니다.
 
-npm run test:gemini -- /path/to/manifest.json [--comment-id ID] [--live]
+npm run test:gemini -- /path/to/manifest.json [--comment-id ID] [--vertex] [--live]
   --comment-id ID    지정한 피드백만 검사 (여러 번 지정 가능, 최대 3개)
   --output PATH      결과 폴더의 상위 경로 (기본 storage/qa/gemini-feedback)
   --live             검증한 글·스틸·그림·참고 이미지를 Gemini에 한 번 전송
+  --vertex           명시적으로 Vertex AI 경로 선택 (기본 Gemini Developer API)
 
-키와 모델은 .env.local의 GEMINI_API_KEY / GEMINI_MODEL을 사용합니다.
+기본 경로는 GEMINI_API_KEY / GEMINI_MODEL을 사용합니다.
+Vertex 경로는 VERTEX_PROJECT_ID / VERTEX_LOCATION과 단기 VERTEX_ACCESS_TOKEN을 사용합니다.
 영상 파일·음성 파일은 보내지 않으며 앱의 원문·승인·버전은 바꾸지 않습니다.`;
 
 function options(args) {
-  const result = { live: false, commentIds: [], output: 'storage/qa/gemini-feedback' };
+  const result = { live: false, vertex: false, commentIds: [], output: 'storage/qa/gemini-feedback' };
   for (let index = 0; index < args.length; index++) {
     const arg = args[index];
     if (arg === '--help' || arg === '-h') return { help: true };
     if (arg === '--live') result.live = true;
+    else if (arg === '--vertex') result.vertex = true;
     else if (arg === '--comment-id' || arg === '--output') {
       const value = args[++index];
       if (!value || value.startsWith('--')) throw new Error(`${arg} 값을 지정해 주세요.`);
@@ -63,12 +66,13 @@ async function main() {
   const directory = await mkdtemp(join(parent, input.live ? 'live-' : 'dry-run-'));
   const codeHashes = {};
   for (const file of ['scripts/test-gemini-feedback.mjs', 'apps/worker/gemini-feedback.mjs']) codeHashes[file] = createHash('sha256').update(await readFile(new URL(`../${file}`, import.meta.url))).digest('hex');
-  const report = { createdAt: new Date().toISOString(), provider: 'gemini', model, mode: input.live ? 'live' : 'dry-run', inputManifest: manifestPath, inputManifestSha256: createHash('sha256').update(original).digest('hex'), requestSha256: createHash('sha256').update(JSON.stringify(prepared.request)).digest('hex'), codeHashes, prepared: prepared.summary, modelCalled: false, networkAttempted: false, generationRequestCount: 0, responseValidated: false };
+  const report = { createdAt: new Date().toISOString(), provider: input.vertex ? 'vertex' : 'gemini', model, mode: input.live ? 'live' : 'dry-run', inputManifest: manifestPath, inputManifestSha256: createHash('sha256').update(original).digest('hex'), requestSha256: createHash('sha256').update(JSON.stringify(prepared.request)).digest('hex'), codeHashes, prepared: prepared.summary, modelCalled: false, networkAttempted: false, generationRequestCount: 0, responseValidated: false };
   const started = performance.now();
   try {
     if (input.live) {
-      if (!process.env.GEMINI_API_KEY?.trim()) throw new Error('GEMINI_API_KEY를 .env.local에 설정해 주세요. 외부 호출은 하지 않았습니다.');
-      report.result = await analyzeGeminiFeedback(prepared, { apiKey: process.env.GEMINI_API_KEY, model, fetchImpl: (...args) => {
+      if (!input.vertex && !process.env.GEMINI_API_KEY?.trim()) throw new Error('GEMINI_API_KEY를 .env.local에 설정해 주세요. 외부 호출은 하지 않았습니다.');
+      const vertex = input.vertex ? { project: process.env.VERTEX_PROJECT_ID, location: process.env.VERTEX_LOCATION || 'global', accessToken: process.env.VERTEX_ACCESS_TOKEN } : undefined;
+      report.result = await analyzeGeminiFeedback(prepared, { apiKey: process.env.GEMINI_API_KEY, vertex, model, fetchImpl: (...args) => {
         report.networkAttempted = true; report.modelCalled = null; report.generationRequestCount++;
         return fetch(...args);
       } });
@@ -82,7 +86,7 @@ async function main() {
   } catch (error) {
     report.status = 'failed';
     // Adapter errors are intentionally generic. Never serialize response headers, payloads or credentials.
-    report.error = String(error?.message || 'Gemini 테스트에 실패했습니다.').replaceAll(process.env.GEMINI_API_KEY || '\0', '[redacted]');
+    report.error = String(error?.message || 'Gemini 테스트에 실패했습니다.').replaceAll(process.env.GEMINI_API_KEY || '\0', '[redacted]').replaceAll(process.env.VERTEX_ACCESS_TOKEN || '\0', '[redacted]');
     process.exitCode = 1;
   } finally {
     report.elapsedMs = Math.round(performance.now() - started);
@@ -92,6 +96,6 @@ async function main() {
 }
 
 main().catch(error => {
-  const message = String(error?.message || '테스트 준비에 실패했습니다.').replaceAll(process.env.GEMINI_API_KEY || '\0', '[redacted]');
+  const message = String(error?.message || '테스트 준비에 실패했습니다.').replaceAll(process.env.GEMINI_API_KEY || '\0', '[redacted]').replaceAll(process.env.VERTEX_ACCESS_TOKEN || '\0', '[redacted]');
   process.stderr.write(`${message}\n`); process.exitCode = 1;
 });

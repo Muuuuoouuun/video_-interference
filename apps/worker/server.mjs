@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { openStore } from './store.mjs';
 import { readJsonBody as bodyJson } from './request-body.mjs';
 import { ingest, renderVideo, mapToSource, mapToOutput, probe, run, ffmpegPath, shutdownMediaProcesses } from './engine.mjs';
-import { interpret, interpreterMode } from './interpreter.mjs';
+import { interpret, interpretLocal, interpreterMode } from './interpreter.mjs';
 import { validateDrawings } from './drawings.mjs';
 import { groupDrawings } from '../../packages/core/drawing-anchors.mjs';
 import { validateRenderSelection } from './render-validation.mjs';
@@ -20,12 +20,18 @@ import { prepareFeedbackExport, selectFeedbackComments } from './feedback-export
 import { preparePremiereExport } from './premiere-export.mjs';
 import { FEEDBACK_CATEGORIES } from '../../packages/core/feedback-category.mjs';
 import { IMAGE_ATTACHMENT_LIMIT } from '../../packages/core/comment-attachments.mjs';
+import { createVertexImageJobs } from './vertex-image-jobs.mjs';
+import { createVertexAudioJobs } from './vertex-audio-jobs.mjs';
+import { createVertexVideoJobs } from './vertex-video-jobs.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const storageRoot = process.env.VI_STORAGE_ROOT || join(root, 'storage');
 const port = Number(process.env.PORT || 4318);
 const devPort = Number(process.env.VI_DEV_PORT || 4317);
 const samplePath = process.env.VI_SAMPLE_PATH || join(root, 'fixtures/demo.mp4');
+const vertexImageJobs = createVertexImageJobs({ storageRoot, project: process.env.VERTEX_PROJECT_ID, enabled: process.env.VI_VERTEX_GENERATION_ENABLED === '1' });
+const vertexAudioJobs = createVertexAudioJobs({ storageRoot, project: process.env.VERTEX_PROJECT_ID, enabled: process.env.VI_VERTEX_GENERATION_ENABLED === '1' });
+const vertexVideoJobs = createVertexVideoJobs({ storageRoot, project: process.env.VERTEX_PROJECT_ID, enabled: process.env.VI_VERTEX_GENERATION_ENABLED === '1' });
 const store = openStore(storageRoot);
 const { data, save } = store;
 const uid = prefix => `${prefix}_${randomUUID().slice(0, 12)}`;
@@ -48,7 +54,7 @@ await mkdir(join(storageRoot, 'media'), { recursive: true });
 await mkdir(join(storageRoot, 'jobs'), { recursive: true });
 
 function publicState() {
-  const capabilities = { ffmpeg: true, interpreter: interpreterMode(), interpreterLabel: interpreterMode() === 'anthropic' ? 'Claude API 연결됨 · 승인 후 실행' : '로컬 규칙 해석 · AI API 미연결', transcription: false, maxDurationSeconds: 600, fps: 30, supportedOps: ['cut', 'trim', 'speed', 'subtitle', 'overlay', 'audio', 'note'] };
+  const capabilities = { ffmpeg: true, interpreter: interpreterMode(), interpreterLabel: interpreterMode() === 'vertex' ? 'Vertex AI 설정됨 · 요청 해석 시 선택 장면 전송' : interpreterMode() === 'anthropic' ? 'Claude API 연결됨 · 승인 후 실행' : '로컬 규칙 해석 · AI API 미연결', transcription: false, maxDurationSeconds: 600, fps: 30, supportedOps: ['cut', 'trim', 'speed', 'subtitle', 'overlay', 'audio', 'note'] };
   if (!data.state) return { empty: true, capabilities };
   const comments = data.state.comments.filter(comment => !comment.deletedAt), ids = new Set(comments.map(comment => comment.id));
   return { ...data.state, comments, deletedComments: data.state.comments.filter(comment => comment.deletedAt), ops: data.state.ops.filter(op => ids.has(op.commentId)), capabilities };
@@ -448,7 +454,14 @@ async function seedSampleComments() {
   if (max < 360) return;
   const speed = createComment({ versionId, frameIn: 150, frameOut: 270, text: '이 구간 2배속으로 빠르게 넘겨줘' });
   const subtitle = createComment({ versionId, frameIn: 270, frameOut: 360, text: '자막: 배움이 이어지는 순간' });
-  await interpretComment(speed); await interpretComment(subtitle);
+  // Startup samples are local examples, not explicit user AI requests.
+  for (const comment of [speed, subtitle]) {
+    const result = interpretLocal(comment, data.state.attachments);
+    data.state.ops.push(...result.ops);
+    comment.status = result.clarification ? 'needs_clarification' : 'interpreted';
+    if (result.clarification) comment.clarification = result.clarification;
+  }
+  save();
 }
 
 async function executeJob(job, version, snapshot, selected, controller) {
@@ -534,6 +547,36 @@ async function handleRequest(req, res) {
     const url = new URL(req.url, `http://127.0.0.1:${port}`), path = url.pathname;
     if (req.method === 'GET' && path === '/api/state') return json(res, 200, publicState());
     if (req.method === 'GET' && path === '/api/health') return json(res, 200, { ok: true, fps: 30, interpreter: interpreterMode() });
+    if (req.method === 'GET' && path === '/api/vertex-image/jobs') return json(res, 200, await vertexImageJobs.list());
+    if (req.method === 'POST' && path === '/api/vertex-image/jobs') {
+      if (!req.headers.origin) throw fail('생성 요청의 출처를 확인할 수 없습니다.', 403);
+      return json(res, 202, await vertexImageJobs.submit(await bodyJson(req, 8192)));
+    }
+    const vertexImageMatch = path.match(/^\/api\/vertex-image\/jobs\/([0-9a-f-]+)(\/image)?$/);
+    if (vertexImageMatch && req.method === 'GET' && !vertexImageMatch[2]) return json(res, 200, await vertexImageJobs.status(vertexImageMatch[1]));
+    if (vertexImageMatch && ['GET', 'HEAD'].includes(req.method) && vertexImageMatch[2]) return await streamFile(req, res, await vertexImageJobs.image(vertexImageMatch[1]), url);
+    if (req.method === 'GET' && path === '/api/vertex-audio/jobs') return json(res, 200, await vertexAudioJobs.list());
+    if (req.method === 'POST' && path === '/api/vertex-audio/jobs') {
+      if (!req.headers.origin) throw fail('생성 요청의 출처를 확인할 수 없습니다.', 403);
+      return json(res, 202, await vertexAudioJobs.submit(await bodyJson(req, 8192)));
+    }
+    const vertexAudioMatch = path.match(/^\/api\/vertex-audio\/jobs\/([0-9a-f-]+)(\/audio)?$/);
+    if (vertexAudioMatch && req.method === 'GET' && !vertexAudioMatch[2]) return json(res, 200, await vertexAudioJobs.status(vertexAudioMatch[1]));
+    if (vertexAudioMatch && ['GET', 'HEAD'].includes(req.method) && vertexAudioMatch[2]) return await streamFile(req, res, await vertexAudioJobs.audio(vertexAudioMatch[1]), url);
+    if (req.method === 'GET' && path === '/api/vertex-video/jobs') return json(res, 200, await vertexVideoJobs.list());
+    if (req.method === 'POST' && path === '/api/vertex-video/jobs') {
+      if (!req.headers.origin) throw fail('생성 요청의 출처를 확인할 수 없습니다.', 403);
+      return json(res, 202, await vertexVideoJobs.submit(await bodyJson(req, 8192)));
+    }
+    const vertexVideoMatch = path.match(/^\/api\/vertex-video\/jobs\/([0-9a-f-]+)(\/(?:video|check))?$/);
+    if (vertexVideoMatch && req.method === 'GET' && !vertexVideoMatch[2]) return json(res, 200, await vertexVideoJobs.status(vertexVideoMatch[1]));
+    if (vertexVideoMatch && req.method === 'POST' && vertexVideoMatch[2] === '/check') {
+      if (!req.headers.origin) throw fail('조회 요청의 출처를 확인할 수 없습니다.', 403);
+      const input = await bodyJson(req, 1024);
+      if (Object.keys(input).length) throw fail('작업 조회에는 추가 값이 필요하지 않습니다.');
+      return json(res, 202, await vertexVideoJobs.checkStatus(vertexVideoMatch[1]));
+    }
+    if (vertexVideoMatch && ['GET', 'HEAD'].includes(req.method) && vertexVideoMatch[2] === '/video') return await streamFile(req, res, await vertexVideoJobs.video(vertexVideoMatch[1]), url);
     if (req.method === 'PATCH' && path === '/api/project') {
       const { input, workspace } = await projectBody(req);
       assertWorkspace(workspace);

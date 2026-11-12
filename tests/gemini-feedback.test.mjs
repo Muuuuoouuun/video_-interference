@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
 import { mkdtemp, mkdir, readFile, writeFile, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -105,6 +106,59 @@ test('Gemini analysis makes one fixed-endpoint request and binds reordered resul
   result.feedback[0].originalFeedback.supplements[0].text = 'local result mutation';
   assert.equal(prepared.entries[0].feedback.supplements[0].text, f.entry.feedback.supplements[0].text);
   assert.ok(!JSON.stringify(result).includes(key));
+});
+
+test('explicit Vertex mode sends the same bounded brief once with a short-lived bearer credential', async t => {
+  const f = await fixture(t), prepared = await prepareGeminiFeedback(f.manifestPath), token = 'offline-test-access-token';
+  let calls = 0;
+  const result = await analyzeGeminiFeedback(prepared, { vertex: { project: 'sample-project-123', location: 'asia-northeast3', accessToken: token }, fetchImpl: async (url, options) => {
+    calls++;
+    assert.equal(url, 'https://asia-northeast3-aiplatform.googleapis.com/v1beta1/projects/sample-project-123/locations/asia-northeast3/publishers/google/models/gemini-3.5-flash-lite:generateContent');
+    assert.equal(options.headers.authorization, `Bearer ${token}`);
+    assert.equal(options.headers['x-goog-api-key'], undefined);
+    assert.equal(options.redirect, 'error');
+    assert.deepEqual(JSON.parse(options.body), prepared.request);
+    assert.ok(!url.includes(token));
+    return new Response(JSON.stringify(envelope([analysis(f.entry), analysis(f.note)])));
+  } });
+  assert.equal(calls, 1);
+  assert.equal(result.provider, 'vertex');
+  assert.equal(result.sourceVideoIncluded, false);
+  assert.equal(result.renderedVideoIncluded, false);
+  assert.equal(result.transcriptionPerformed, false);
+  assert.ok(!JSON.stringify(result).includes(token));
+});
+
+test('Vertex rejects unsafe configuration and never falls back to a paid Developer API call', async t => {
+  const f = await fixture(t), prepared = await prepareGeminiFeedback(f.manifestPath); let calls = 0;
+  const fetchImpl = async () => { calls++; throw new Error('must not call'); };
+  for (const vertex of [
+    { project: 'evil/path', location: 'global', accessToken: 'test' },
+    { project: 'sample-project-123', location: 'global.evil.com', accessToken: 'test' },
+    { project: 'sample-project-123', location: 'global', accessToken: 'bad\ntoken' },
+    { project: 'sample-project-123', location: 'global' },
+  ]) await assert.rejects(analyzeGeminiFeedback(prepared, { apiKey: key, vertex, fetchImpl }), error => ['INVALID_VERTEX_CONFIG', 'MISSING_VERTEX_TOKEN'].includes(error.code));
+  assert.equal(calls, 0);
+  await assert.rejects(analyzeGeminiFeedback(prepared, { apiKey: key, vertex: { project: 'sample-project-123', location: 'global', accessToken: 'test' }, fetchImpl: async (url) => {
+    calls++;
+    assert.ok(url.startsWith('https://aiplatform.googleapis.com/'));
+    return new Response('provider error', { status: 403 });
+  } }), errorCode('GEMINI_HTTP_ERROR'));
+  assert.equal(calls, 1);
+});
+
+test('Vertex CLI dry run needs no credential and records that no network was attempted', async t => {
+  const f = await fixture(t), output = join(f.directory, 'output');
+  const child = spawnSync(process.execPath, ['scripts/test-gemini-feedback.mjs', f.manifestPath, '--vertex', '--output', output], {
+    cwd: process.cwd(), encoding: 'utf8', env: { ...process.env, GEMINI_API_KEY: '', VERTEX_ACCESS_TOKEN: '', VERTEX_PROJECT_ID: '' },
+  });
+  assert.equal(child.status, 0, child.stderr);
+  const result = JSON.parse(child.stdout), report = JSON.parse(await readFile(result.report, 'utf8'));
+  assert.equal(report.provider, 'vertex');
+  assert.equal(report.status, 'prepared-no-network');
+  assert.equal(report.modelCalled, false);
+  assert.equal(report.networkAttempted, false);
+  assert.equal(report.generationRequestCount, 0);
 });
 
 test('Gemini preparation requires an exact small selection and never silently drops excess images or bytes', async t => {

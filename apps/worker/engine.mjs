@@ -1,12 +1,29 @@
 import { spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
+import { accessSync, constants } from 'node:fs';
 import { mkdir, writeFile, access, stat, rename } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { drawingsSvg, assertStaticDrawingFrames } from './drawings.mjs';
 
 export const FPS = 30;
-export const ffmpegPath = process.env.FFMPEG_PATH || '/opt/homebrew/bin/ffmpeg';
-export const ffprobePath = process.env.FFPROBE_PATH || '/opt/homebrew/bin/ffprobe';
+function mediaBinary(name, explicit) {
+  if (explicit) return explicit;
+  // Desktop launches on macOS may have a minimal PATH that omits Homebrew.
+  // Prefer PATH when available so Linux and user-installed versions work.
+  if (process.platform === 'darwin') {
+    const availableOnPath = (process.env.PATH || '').split(':').filter(Boolean).some(directory => {
+      try { accessSync(join(directory, name), constants.X_OK); return true; } catch { return false; }
+    });
+    if (!availableOnPath) {
+      const homebrewPath = join('/opt/homebrew/bin', name);
+      try { accessSync(homebrewPath, constants.X_OK); return homebrewPath; } catch { /* Let spawn report the missing binary. */ }
+    }
+  }
+  return name;
+}
+
+export const ffmpegPath = mediaBinary('ffmpeg', process.env.FFMPEG_PATH);
+export const ffprobePath = mediaBinary('ffprobe', process.env.FFPROBE_PATH);
 
 const canceledError = () => Object.assign(new Error('렌더를 취소했습니다.'), { name: 'AbortError' });
 const checkCancellation = signal => { if (signal?.aborted) throw canceledError(); };
