@@ -1,7 +1,7 @@
 import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowDownToLine, ArrowUpToLine, Copy, SlidersHorizontal, ArrowUpRight, Circle, CornerUpLeft, CornerUpRight, Eraser, MousePointer2, Pencil, Plus, RotateCcw, Slash, Square, Trash2, Type, X } from 'lucide-react';
+import { ArrowDownToLine, ArrowUpToLine, ChevronDown, ChevronLeft, Copy, SlidersHorizontal, ArrowUpRight, Circle, CornerUpLeft, CornerUpRight, Eraser, MousePointer2, Pencil, Plus, RotateCcw, Slash, Square, Trash2, Type, X } from 'lucide-react';
 import type { Drawing, Point } from '../../../../packages/core/types';
 import { arrowHeadPoints, createDrawing, drawingBounds, drawingResizeHandles, isDrawableSize, normalizeDrawing, translateDrawing } from '../../../../packages/core/overlay-geometry.mjs';
 import type { DrawingHandle, DrawingStyle } from '../../../../packages/core/overlay-geometry.mjs';
@@ -25,6 +25,8 @@ const DEFAULT_EDITOR_STYLE: EditorStyle = { ...DEFAULT_STYLE, fontSize: 32 };
 const WIDTH_PRESETS = [{ value: 1, label: '얇게' }, { value: 3, label: '보통' }, { value: 8, label: '굵게' }, { value: 16, label: '아주 굵게' }];
 const COLORS = ['#bcf7de', '#ffffff', '#ffd166', '#ff7878', '#86baff'];
 const SHAPE_LIMIT = 30;
+const TOOLS_OPEN_KEY = 'vi.drawingToolsOpen';
+function readToolsOpen() { try { return localStorage.getItem(TOOLS_OPEN_KEY) === '1'; } catch { return false; } }
 const EMPTY_DRAWINGS: Drawing[] = [];
 const TOOL_OPTIONS: { id: Tool; label: string; shortcut: string; icon: typeof MousePointer2 }[] = [
   { id: 'select', label: '선택', shortcut: 'V', icon: MousePointer2 },
@@ -110,6 +112,9 @@ export const OverlayEditor = memo(function OverlayEditor({ drawings, currentFram
   const ownerId = `oe-${useId().replace(/:/g, '')}`;
   const svgRef = useRef<SVGSVGElement>(null);
   const [tool, setTool] = useState<Tool>('select');
+  // Docked drawing tools start folded; shortcuts keep working while folded.
+  const [toolsOpen, setToolsOpen] = useState(readToolsOpen);
+  useEffect(() => { try { localStorage.setItem(TOOLS_OPEN_KEY, toolsOpen ? '1' : '0'); } catch { /* Per-viewer convenience only. */ } }, [toolsOpen]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [toolStyles, setToolStyles] = useState<Partial<Record<Drawing['kind'], EditorStyle>>>({});
   const [popover, setPopover] = useState<StylePopover | null>(null);
@@ -576,7 +581,13 @@ export const OverlayEditor = memo(function OverlayEditor({ drawings, currentFram
     {historyFrameHint !== null && historyFrameHint !== currentFrame && onFrameSelect ? <button className="oe-history-frame-link" disabled={blocked} onClick={() => onFrameSelect(historyFrameHint)}>변경 장면 {frameTime(historyFrameHint)} 보기</button> : null}
   </div>;
   const canvasStyle: CSSProperties = { left: viewport.left, top: viewport.top, width: viewport.width, height: viewport.height, display: !enabled ? 'none' : undefined, pointerEvents: readOnly || blocked ? 'none' : undefined };
-  const tools = <div className="oe-toolbar-main" data-overlay-owner={ownerId} data-history-revision={historyRevision}>
+  const activeTool = TOOL_OPTIONS.find(item => item.id === tool) ?? TOOL_OPTIONS[0];
+  const ActiveToolIcon = tool === 'select' ? Pencil : activeTool.icon;
+  const toolsFolded = Boolean(toolsHost) && !toolsOpen;
+  const tools = toolsFolded ? <div className="oe-toolbar-main oe-toolbar-folded" data-overlay-owner={ownerId} data-history-revision={historyRevision}>
+      <button type="button" className={`oe-tools-toggle${tool !== 'select' ? ' oe-tool-active' : ''}`} disabled={blocked} aria-expanded={false} aria-label="그리기 도구 펼치기" title="그리기 도구 펼치기 · 접힌 상태에서도 V P B E L A T 단축키 사용" onClick={() => setToolsOpen(true)}><ActiveToolIcon size={16}/><span>{tool === 'select' ? '그리기' : activeTool.label}</span><ChevronDown size={13}/></button>
+    </div> : <div className="oe-toolbar-main" data-overlay-owner={ownerId} data-history-revision={historyRevision}>
+      {toolsHost ? <button type="button" className="oe-tools-collapse" aria-expanded={true} aria-label="그리기 도구 접기" title="그리기 도구 접기" onClick={() => { setPopover(null); setToolsOpen(false); }}><ChevronLeft size={15}/></button> : null}
       <div className="oe-tool-group" role="group" aria-label="영상 위 그림 도구">{TOOL_OPTIONS.map(({ id, label, shortcut, icon: Icon }) => <button key={id} className={`oe-tool${tool === id ? ' oe-tool-active' : ''}`} disabled={blocked} onClick={event => {
         popoverTrigger.current = event.currentTarget;
         if (tool !== id) { chooseTool(id); return; }
@@ -627,7 +638,8 @@ export const OverlayEditor = memo(function OverlayEditor({ drawings, currentFram
     {!toolsHost ? tools : null}
     {onInsertDrawings && multipleFrames ? <p className="oe-insert-frame-warning">여러 장면의 그림입니다. 선택한 장면만 복사한 새 요청에서 영상에 넣어 주세요.</p> : null}
     {frameGroups.length > 0 || historyFrameHint !== null ? sceneNavigation : null}
-    <div className="oe-editor-status"><span>{blocked ? blockedLabel : !enabled ? '재생 중 · 위치 메모 숨김' : selected ? '드래그로 이동 · 핸들로 크기 조절 · 방향키로 1px 이동 · 길게 누른 이동은 한 번에 되돌리기' : onInsertDrawings ? '위치 메모 · 영상에 넣으려면 삽입 요청 후 승인' : '표시한 위치·그림은 피드백에 함께 저장됩니다.'}</span><span role="status">{notice || (tool === 'pen' ? '펜 연속 그리기 · V 선택 · B 박스 · T 텍스트' : tool === 'text' ? '클릭해 텍스트 연속 입력 · V 선택 · P 펜' : 'V 선택 · P 펜 · B 박스 · E 원 · L 선 · A 화살표 · T 텍스트')}</span></div>
+    {/* Shortcut lists live in the footer bar; only contextual guidance stays here. */}
+    {(() => { const guidance = blocked ? blockedLabel : !enabled ? '재생 중 · 위치 메모 숨김' : selected ? '드래그로 이동 · 핸들로 크기 조절 · 방향키로 1px 이동' : onInsertDrawings && drawings.length ? '위치 메모 · 영상에 넣으려면 삽입 요청 후 승인' : ''; return guidance || notice ? <div className="oe-editor-status"><span>{guidance}</span><span role="status">{notice}</span></div> : null; })()}
   </div>;
 
   return <>

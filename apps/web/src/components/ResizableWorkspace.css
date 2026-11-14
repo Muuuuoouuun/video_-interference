@@ -5,7 +5,7 @@
   .workspace-resize-project { left: var(--project-width); transform: translateX(-50%); }
   .workspace-resize-feedback { right: var(--feedback-width); transform: translateX(50%); }
   .workspace-resize-handle::before { content: ''; position: absolute; top: 0; bottom: 0; left: 4px; width: 2px; background: transparent; }
-  .workspace-resize-handle > span { position: relative; width: 3px; height: 32px; border-radius: 3px; background: #c5cbd4; }
+  .workspace-resize-handle > span { position: relative; width: 3px; height: 32px; border-radius: 2px; background: #c5cbd4; }
   .workspace-resize-handle:hover::before { background: #aeb9ca; }
   .workspace-resize-handle:hover > span { background: #8a99b2; }
   .workspace-resize-handle:focus-visible { outline: none; }
