@@ -1,11 +1,13 @@
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, writeFile, stat, rename, rm, readdir } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile, stat, rename, rm } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import sharp from 'sharp';
-import { ffmpegPath, run } from './engine.mjs';
-import { planCanonicalFrameDecode } from './canonical-frames.mjs';
+import { extractCanonicalFrames } from './canonical-frames.mjs';
+import { mediaConcurrency } from './parallel.mjs';
 
 const CELL_WIDTH = 160, CELL_HEIGHT = 90, RENDERER = 'filmstrip-v1';
+// Thumbnails run beside playback, so they use at most two single-threaded decodes.
+const FILMSTRIP_CONCURRENCY = 2;
 const failure = (message, status = 400) => Object.assign(new Error(message), { status });
 const abort = signal => signal?.throwIfAborted();
 
@@ -45,7 +47,7 @@ export async function readFilmstripCache(options) {
   return cached(await identity(options), options.signal);
 }
 
-/** One bounded native decode extracts exact canonical frame indexes; completed output publishes atomically. */
+/** Short seek+decode runs extract exact canonical frame indexes; completed output publishes atomically. */
 export async function prepareFilmstrip(options) {
   const { videoPath, directory, signal } = options;
   abort(signal);
@@ -54,19 +56,18 @@ export async function prepareFilmstrip(options) {
   await mkdir(directory, { recursive: true });
   const work = await mkdtemp(join(directory, '.filmstrip-')), started = performance.now();
   try {
-    const decode = planCanonicalFrameDecode(info.frames);
-    const filter = `select=${decode.select},scale=${CELL_WIDTH}:${CELL_HEIGHT}:force_original_aspect_ratio=decrease:force_divisible_by=2,pad=${CELL_WIDTH}:${CELL_HEIGHT}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1`;
-    await run(ffmpegPath, ['-y', '-hide_banner', '-loglevel', 'error', '-threads', '1', ...decode.inputArgs, '-i', videoPath, '-map', '0:v:0', '-an', '-sn', '-dn', '-vf', filter, '-fps_mode', 'vfr', '-frames:v', String(info.frames.length), '-start_number', '0', '-threads', '1', join(work, '%02d.png')], { signal, timeout: 120_000 });
+    const filter = `scale=${CELL_WIDTH}:${CELL_HEIGHT}:force_original_aspect_ratio=decrease:force_divisible_by=2,pad=${CELL_WIDTH}:${CELL_HEIGHT}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1`;
+    const extracted = await extractCanonicalFrames({ videoPath, frames: info.frames, directory: work, filter, extension: 'png', threads: 1, concurrency: mediaConcurrency(FILMSTRIP_CONCURRENCY), signal });
     abort(signal);
-    const cells = (await readdir(work)).filter(name => /^\d{2}\.png$/.test(name)).sort();
-    if (cells.length !== info.frames.length) throw failure('버전 길이와 실제 영상 프레임이 맞지 않아 시간축 썸네일을 만들지 못했습니다.', 409);
+    const cells = extracted.paths;
+    if (cells.some(path => !path)) throw failure('버전 길이와 실제 영상 프레임이 맞지 않아 시간축 썸네일을 만들지 못했습니다.', 409);
     const imagePath = join(work, 'sprite.png');
-    await sharp({ create: { width: CELL_WIDTH * cells.length, height: CELL_HEIGHT, channels: 3, background: '#000000' } }).composite(cells.map((name, index) => ({ input: join(work, name), left: index * CELL_WIDTH, top: 0 }))).png().toFile(imagePath);
+    await sharp({ create: { width: CELL_WIDTH * cells.length, height: CELL_HEIGHT, channels: 3, background: '#000000' } }).composite(cells.map((path, index) => ({ input: path, left: index * CELL_WIDTH, top: 0 }))).png().toFile(imagePath);
     abort(signal);
     const persisted = { versionId: info.versionId, durationFrames: info.durationFrames, fps: 30, cellWidth: CELL_WIDTH, cellHeight: CELL_HEIGHT, frames: info.frames, cacheKey: info.cacheKey };
     const manifestPath = join(work, 'manifest.json'); await writeFile(manifestPath, JSON.stringify(persisted));
     abort(signal);
     await rename(imagePath, info.imagePath); await rename(manifestPath, info.manifestPath);
-    return { ...info, cacheHit: false, diagnostics: { ffmpegRuns: 1, decodePasses: 1, elapsedMs: Math.round(performance.now() - started) } };
+    return { ...info, cacheHit: false, diagnostics: { ffmpegRuns: extracted.runs, decodePasses: extracted.runs, elapsedMs: Math.round(performance.now() - started) } };
   } finally { await rm(work, { recursive: true, force: true }); }
 }

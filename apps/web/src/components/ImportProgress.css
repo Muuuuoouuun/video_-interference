@@ -1,0 +1,18 @@
+.import-progress { display: flex; align-items: center; gap: 12px; min-width: 0; color: var(--text); }
+.import-progress > svg { flex-shrink: 0; color: var(--accent); }
+.import-progress-copy { flex: 1; min-width: 0; display: grid; gap: 5px; }
+.import-progress-copy strong { display: flex; align-items: baseline; gap: 8px; font-size: 13px; font-weight: 600; }
+.import-progress-step { color: var(--muted); font-size: 11px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.import-progress-percent { margin-left: auto; color: var(--accent); font-variant-numeric: tabular-nums; }
+.import-progress-detail { overflow: hidden; color: var(--text-secondary); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.import-progress-track { position: relative; height: 4px; overflow: hidden; border-radius: 999px; background: var(--surface-muted); }
+.import-progress-track > span { position: absolute; inset: 0 auto 0 0; border-radius: inherit; background: var(--accent); transition: width var(--motion-base, 200ms) var(--ease-out, ease-out); }
+.import-progress-indeterminate > span { width: 32%; animation: import-progress-slide 1.2s var(--ease-out, ease-out) infinite; }
+.import-progress-cancel { flex-shrink: 0; display: inline-flex; align-items: center; gap: 4px; }
+@keyframes import-progress-slide { from { transform: translateX(-100%); } to { transform: translateX(320%); } }
+@media (prefers-reduced-motion: reduce) { .import-progress-indeterminate > span { animation: none; width: 100%; opacity: .45; } .import-progress-track > span { transition: none; } }
+
+/* The start screen already shows a large progress icon beside this row. */
+.video-start .import-progress > svg { display: none; }
+.app-import-progress { position: fixed; z-index: 40; top: 76px; left: 50%; width: min(520px, calc(100vw - 32px)); padding: 12px 14px; transform: translateX(-50%); border: 1px solid var(--border); border-radius: 10px; background: var(--surface); box-shadow: var(--shadow-pop); }
+.video-start .video-start-progress { flex: 1; }

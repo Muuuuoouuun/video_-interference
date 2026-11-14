@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { FolderOpen, Play, ShieldCheck, Layers, Film, Download, Columns2, X, LoaderCircle, Info, Package, Square, Keyboard, Trash2, RotateCcw, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, SquarePen, CornerUpLeft, MoreHorizontal } from 'lucide-react';
-import type { AppState, BootstrapState, Comment, Drawing, EditOp, FeedbackExportResult, FeedbackCategory, InterpretResult, LayerChangeInput, LayerChangeResult, Project, RenderJob, RenderLayer, Version } from '../../../packages/core/types';
+import { FolderOpen, Play, ShieldCheck, Layers, Film, Download, Columns2, X, LoaderCircle, Info, Package, Square, Keyboard, Trash2, RotateCcw, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, SquarePen, CornerUpLeft, MoreHorizontal, CircleCheck, CircleAlert, FileAudio } from 'lucide-react';
+import type { AppState, Attachment, BootstrapState, Comment, Drawing, EditOp, FeedbackExportResult, FeedbackCategory, InterpretResult, LayerChangeInput, LayerChangeResult, Project, RenderJob, RenderLayer, ReviewMarker, Version } from '../../../packages/core/types';
 import { confirmedMutation } from '../../../packages/core/confirmed-mutation.mjs';
 import { projectComment } from '../../../packages/core/comment-projection.mjs';
 import { createProjectedRequestDraft, planPlayerCompose } from '../../../packages/core/request-draft.mjs';
 import { drawingFrame, groupDrawings, projectDrawings } from '../../../packages/core/drawing-anchors.mjs';
-import { api, upload } from './api';
+import { api, isAbortError, upload } from './api';
+import { ImportProgress, type ImportProgressState } from './components/ImportProgress';
 import { time } from './format';
 import { FeedbackExportDialog } from './components/FeedbackExportDialog';
 import { PremiereExportDialog, type PremiereExportResult } from './components/PremiereExportDialog';
@@ -59,6 +60,8 @@ export function App() {
   const [layerDraftOpen, setLayerDraftOpen] = useState(false);
   const [feedbackRevealToken, setFeedbackRevealToken] = useState(0);
   const [loadingFile, setLoadingFile] = useState(false);
+  const [importProgress, setImportProgress] = useState<ImportProgressState | null>(null);
+  const importAbort = useRef<AbortController | null>(null);
   const [selectedId, setSelectedId] = useState<string|null>(null);
   const [selectedRangeIndex, setSelectedRangeIndex] = useState(0);
   const [currentFrame, setCurrentFrame] = useState(0);
@@ -82,6 +85,7 @@ export function App() {
   const feedbackExpandRef = useRef<HTMLButtonElement>(null);
   const feedbackCollapseRef = useRef<HTMLButtonElement>(null);
   const workspacePlaybackRef = useRef<VideoWorkspaceHandle>(null);
+  const markerRequests = useRef(new Set<string>());
   const load = useCallback(async () => {
     const state = await api<BootstrapState>('/api/state');
     if ('empty' in state) { setEmpty(true); setData(null); return state; }
@@ -166,6 +170,17 @@ export function App() {
     catch (error) { setPremiereError(error instanceof Error ? error.message : 'Premiere 연동 자료를 준비하지 못했습니다.'); }
     finally { premiereInFlight.current = false; setBusy(false); }
   }
+  const [transcribingId, setTranscribingId] = useState<string|null>(null);
+  const onTranscribe = useCallback(async (id: string) => {
+    // Only the voice memo's button waits; long local transcription does not lock the rest of the workspace.
+    setTranscribingId(id); setError('');
+    try {
+      const attachment = await api<Attachment>(`/api/attachments/${id}/transcribe`, 'POST', {});
+      setData(state => state ? { ...state, attachments: state.attachments.map(item => item.id === id ? attachment : item) } : state);
+      setNotice('음성을 로컬에서 받아썼습니다. 자동 결과이니 원본 음성과 대조해 주세요. 내보낼 자료에 함께 들어갑니다.');
+    } catch (error) { setError((error as Error).message); }
+    finally { setTranscribingId(null); }
+  }, []);
   async function exportFeedback() {
     if (!version || !data || !data.comments.length || busy || loadingFile || composerActive || rendering || exportInFlight.current) return;
     if (draftPending || supplementDraft || layerDraftOpen) { setError('작성 중인 피드백을 먼저 저장한 뒤 내보내 주세요.'); return; }
@@ -324,6 +339,39 @@ export function App() {
     setRange({ in: frame, out: Math.min(frame + 1, version.durationFrames) });
     setFeedbackAnchorMode(mode);
   }
+  // Optimistic: the flag appears/disappears on keypress and rolls back if the save fails.
+  // One request per frame at a time, so a held or double-pressed B cannot race itself.
+  async function toggleMarker(frame: number) {
+    if (!version || !data) return;
+    const key = `${version.id}:${frame}`;
+    if (markerRequests.current.has(key)) return;
+    const existing = data.markers.find(marker => marker.versionId === version.id && marker.frame === frame);
+    const setMarkers = (update: (markers: ReviewMarker[]) => ReviewMarker[]) => setData(state => state ? { ...state, markers: update(state.markers) } : state);
+    markerRequests.current.add(key);
+    try {
+      if (existing) {
+        setMarkers(markers => markers.filter(marker => marker.id !== existing.id));
+        try { await api<ReviewMarker>(`/api/markers/${existing.id}`, 'DELETE'); }
+        catch (error) { setMarkers(markers => [...markers, existing]); throw error; }
+      } else {
+        const pending: ReviewMarker = { id: `pending:${key}`, versionId: version.id, frame, createdAt: new Date().toISOString() };
+        setMarkers(markers => [...markers, pending]);
+        try {
+          const marker = await api<ReviewMarker>('/api/markers', 'POST', { versionId: version.id, frame });
+          setMarkers(markers => [...markers.filter(item => item.id !== pending.id && item.id !== marker.id), marker]);
+        } catch (error) { setMarkers(markers => markers.filter(item => item.id !== pending.id)); throw error; }
+      }
+    } catch (error) { setError(`마커를 저장하지 못했습니다. ${(error as Error).message}`); }
+    finally { markerRequests.current.delete(key); }
+  }
+  // Marker loops reuse the draft I/O range, so a later feedback lands on the looped span.
+  function loopMarkers(next: { in: number; out: number }) {
+    if (!version || draftLocked) return false;
+    setSelectedId(null); setPreviewOpId(null);
+    setRange(next); setFeedbackAnchorMode('range');
+    if (!draftReturnable) draftFrame.current = next.in;
+    return true;
+  }
   function clearRange() {
     if (selectedComment) { composeAtPlayhead(false); return; }
     changeAnchorMode('point');
@@ -385,11 +433,29 @@ export function App() {
   }
   async function importFile(file: File) {
     if (draftPending || supplementDraft || layerDraftOpen) { setError('작성 중인 요청과 그래픽 수정을 먼저 저장하거나 취소하세요.'); return; }
+    if (importAbort.current) return;
+    const controller = new AbortController(); importAbort.current = controller;
     setLoadingFile(true); setError('');
-    try { await upload('/api/assets', file, file.name); setData(null); setEmpty(false); initialized.current = false; const imported = await load(); if ('empty' in imported) return; setCurrentFrame(0); setRange({ in: 0, out: 1 }); setSelectedId(null); setDrawings([]); resetDrawingHistory(); setPreviewOpId(null); setCompare(false); setFeedbackAnchorMode('point'); setExportResult(null); setNotice('영상을 가져왔습니다. 구간을 선택하고 요청을 남겨보세요.'); } catch (e) { setError((e as Error).message); } finally { setLoadingFile(false); }
+    setImportProgress({ name: file.name, stage: 'receiving', progress: 0, sentBytes: 0, totalBytes: file.size, stageStartedAt: Date.now() });
+    // Upload bytes come from the browser; once the file is on disk the worker reports conversion progress.
+    const poll = window.setInterval(() => {
+      void api<{ active: boolean; stage?: 'receiving' | 'converting'; progress?: number }>('/api/import-status').then(status => {
+        if (controller.signal.aborted || !status.active || status.stage !== 'converting') return;
+        setImportProgress(current => !current || current.stage === 'finishing' ? current : current.stage === 'converting' ? { ...current, progress: status.progress ?? 0 } : { ...current, stage: 'converting', progress: status.progress ?? 0, stageStartedAt: Date.now() });
+      }).catch(() => {});
+    }, 800);
+    try {
+      await upload('/api/assets', file, file.name, undefined, { signal: controller.signal, onProgress: (sentBytes, totalBytes) => setImportProgress(current => current?.stage === 'receiving' ? { ...current, sentBytes, totalBytes, progress: totalBytes ? sentBytes / totalBytes : 0 } : current) });
+      setImportProgress(current => current ? { ...current, stage: 'finishing', progress: 1 } : current);
+      setData(null); setEmpty(false); initialized.current = false; const imported = await load(); if ('empty' in imported) return; setCurrentFrame(0); setRange({ in: 0, out: 1 }); setSelectedId(null); setDrawings([]); resetDrawingHistory(); setPreviewOpId(null); setCompare(false); setFeedbackAnchorMode('point'); setExportResult(null); setNotice('영상을 가져왔습니다. 구간을 선택하고 요청을 남겨보세요.');
+    } catch (e) {
+      if (isAbortError(e)) setNotice('영상 가져오기를 취소했습니다. 기존 작업은 그대로입니다.');
+      else setError((e as Error).message);
+    } finally { window.clearInterval(poll); importAbort.current = null; setImportProgress(null); setLoadingFile(false); }
   }
+  const cancelImport = useCallback(() => importAbort.current?.abort(), []);
   const previous = data?.versions.find(v => v.id === version?.parentVersionId) ?? data?.versions.find(v => v.id !== version?.id && v.status === 'ready');
-  if (empty) return <><VideoStart busy={loadingFile} error={error} onImport={importFile} onError={setError} onGenerate={() => setVertexImageOpen(true)} onGenerateAudio={() => setVertexAudioOpen(true)} onGenerateVideo={() => setVertexVideoOpen(true)}/><VertexImageDialog open={vertexImageOpen} onClose={() => setVertexImageOpen(false)}/><VertexAudioDialog open={vertexAudioOpen} onClose={() => setVertexAudioOpen(false)}/><VertexVideoDialog open={vertexVideoOpen} onClose={() => setVertexVideoOpen(false)}/></>;
+  if (empty) return <><VideoStart busy={loadingFile} error={error} progress={importProgress} onCancel={cancelImport} onImport={importFile} onError={setError} onGenerate={() => setVertexImageOpen(true)} onGenerateAudio={() => setVertexAudioOpen(true)} onGenerateVideo={() => setVertexVideoOpen(true)}/><VertexImageDialog open={vertexImageOpen} onClose={() => setVertexImageOpen(false)}/><VertexAudioDialog open={vertexAudioOpen} onClose={() => setVertexAudioOpen(false)}/><VertexVideoDialog open={vertexVideoOpen} onClose={() => setVertexVideoOpen(false)}/></>;
   if (!data || !version) return <div className="boot"><span className="wordmark">INTERFERENCE</span><LoaderCircle className="spinning"/><p>{error || '로컬 영상을 준비하고 있습니다.'}</p>{error ? <button className="primary" onClick={() => void load().catch(e => setError((e as Error).message))}>다시 연결</button> : null}</div>;
   return <div className="app-shell">
     <header className="app-header">
@@ -412,10 +478,10 @@ export function App() {
         <div className="rail-collapse-heading"><button type="button" className="rail-collapse-toggle" aria-label={projectPanelOpen ? '프로젝트 패널 접기' : '프로젝트 패널 펼치기'} aria-expanded={projectPanelOpen} aria-controls="project-panel-content" title={projectPanelOpen ? '프로젝트 접기' : '프로젝트 펼치기'} onClick={() => setProjectPanelOpen(value => !value)}>{projectPanelOpen ? <PanelLeftClose size={19}/> : <PanelLeftOpen size={19}/>}</button>{projectPanelOpen ? <span>프로젝트</span> : null}</div>
         {!projectPanelOpen ? <nav className="collapsed-project-tools" aria-label="프로젝트 빠른 메뉴"><button type="button" title="버전 기록" aria-label="버전 기록 펼치기" onClick={() => setProjectPanelOpen(true)}><Layers size={18}/></button><button type="button" title="첨부 보관함" aria-label="첨부 보관함" onClick={() => setShowAssets(true)}><Package size={18}/></button><button type="button" title="휴지통" aria-label="피드백 휴지통" onClick={() => setTrashOpen(true)}><Trash2 size={18}/></button></nav> : null}
         <div id="project-panel-content" className="version-rail-content" hidden={!projectPanelOpen}><div className="project-selected"><Film size={18}/><span>{data.project.name}</span></div><div className="rail-heading version-heading"><Layers size={18}/><span>버전 기록</span></div><div className="version-list">{data.versions.filter(v => v.status === 'ready').map(v => <button key={v.id} className={`version-card ${v.id === version.id ? 'active' : ''}`} onClick={() => void selectVersion(v)} disabled={busy || loadingFile || composerActive || draftPending || supplementDraft || layerDraftOpen}><div><strong>v{v.number} {v.number === 1 ? '원본' : '편집본'}</strong><span>{time(v.durationFrames).split('.')[0]}</span></div><img src={v.thumbnailUrl} alt={`버전 ${v.number} 미리보기`}/><small>{v.number === 1 ? '원본 보존' : v.appliedOpIds ? `이번 변경 ${v.appliedOpIds.length}개` : `편집 ${v.opIds.length}개`}</small></button>)}</div><button className="rail-link" onClick={() => setShowAssets(!showAssets)}><Package size={17}/>에셋<span>{data.attachments.length || ''}</span></button><button className="rail-link" onClick={() => setTrashOpen(true)}><Trash2 size={17}/>휴지통<span>{data.deletedComments?.length || ''}</span></button><div className="rail-bottom"><ShieldCheck size={15}/><span>로컬 프로젝트</span></div></div></aside>
-      <section className="workspace-shell"><div className="workspace-heading"><div><strong>v{version.number} {version.number === 1 ? '원본' : '편집본'}</strong><span>{data.asset.width} × {data.asset.height} · 30 fps</span></div><div className="workspace-actions">{editingMode ? <button className={`quiet ${compare ? 'mint-text' : ''}`} disabled={!previous} onClick={() => setCompare(!compare)}><Columns2 size={15}/>{compare ? '비교 닫기' : '비교'}</button> : null}{editingMode ? <a className="quiet" aria-label="현재 버전 MP4 다운로드" href={`${version.mediaUrl}${version.mediaUrl.includes('?') ? '&' : '?'}download=1`} download><Download size={15}/><span>영상 받기</span></a> : null}</div></div><VideoWorkspace playbackRef={workspacePlaybackRef} version={version} versions={data.versions} asset={data.asset} comments={data.comments} attachments={data.attachments} selectedCommentId={selectedId} selectedRangeIndex={selectedRangeIndex} currentFrame={currentFrame} focusFrameToken={focusFrameToken} onFrameChange={frame => { setCurrentFrame(frame); if (!selectedComment) draftFrame.current = frame; }} range={reviewRange} rangeActive={rangeActive} onRangeClear={clearRange} onRangeStart={() => changeAnchorMode('range')} rangeAvailable={!selectedComment || Boolean(selectedProjectedRange)} composeLabel={draftReturnable && selectedComment ? '초안으로 돌아가기' : selectedComment || feedbackAnchorMode === 'point' ? '현재 시점에 피드백' : '선택 구간에 피드백'} onRangeChange={next => { if (!selectedComment && !draftLocked) { setRange(next); setFeedbackAnchorMode('range'); } }} drawings={selectedComment ? selectedDrawings : drawings} onDrawingsChange={next => { if (!selectedComment && !draftLocked) setDrawings(next); }} editingLocked={busy || loadingFile || composerActive || layerDraftOpen || (!selectedComment && voiceAnchorLocked)} editingLockLabel={voiceAnchorLocked ? '음성의 구간·그림 고정 · 작성창에서 녹음 저장 상태를 확인하세요' : undefined} drawingHistoryKey={`${version.id}:draft:${drawingGeneration}`} onDrawingHistoryChange={setDrawingHistoryAvailable} annotationsReadOnly={Boolean(selectedComment)} annotationFrame={selectedComment ? projection?.contextFrame ?? undefined : drawingContext.current} onSelectComment={(comment, rangeIndex, frame) => selectComment(comment, rangeIndex, true, frame)} onDrawingCreate={frame => {drawingContext.current=frame;}} onCompose={() => composeAtPlayhead()} onInsertDrawings={!editingMode || selectedComment ? undefined : () => void insertDrawings()} imageOverlay={imageOverlay} compareVersion={compare ? previous : null}/></section>
+      <section className="workspace-shell"><div className="workspace-heading"><div><strong>v{version.number} {version.number === 1 ? '원본' : '편집본'}</strong><span>{data.asset.width} × {data.asset.height} · 30 fps</span></div><div className="workspace-actions">{editingMode ? <button className={`quiet ${compare ? 'mint-text' : ''}`} disabled={!previous} onClick={() => setCompare(!compare)}><Columns2 size={15}/>{compare ? '비교 닫기' : '비교'}</button> : null}{editingMode ? <a className="quiet" aria-label="현재 버전 MP4 다운로드" href={`${version.mediaUrl}${version.mediaUrl.includes('?') ? '&' : '?'}download=1`} download><Download size={15}/><span>영상 받기</span></a> : null}</div></div><VideoWorkspace playbackRef={workspacePlaybackRef} version={version} versions={data.versions} asset={data.asset} comments={data.comments} attachments={data.attachments} reviewMarkers={data.markers} onToggleMarker={frame => void toggleMarker(frame)} onLoopMarkers={loopMarkers} selectedCommentId={selectedId} selectedRangeIndex={selectedRangeIndex} currentFrame={currentFrame} focusFrameToken={focusFrameToken} onFrameChange={frame => { setCurrentFrame(frame); if (!selectedComment) draftFrame.current = frame; }} range={reviewRange} rangeActive={rangeActive} onRangeClear={clearRange} onRangeStart={() => changeAnchorMode('range')} rangeAvailable={!selectedComment || Boolean(selectedProjectedRange)} composeLabel={draftReturnable && selectedComment ? '초안으로 돌아가기' : selectedComment || feedbackAnchorMode === 'point' ? '현재 시점에 피드백' : '선택 구간에 피드백'} onRangeChange={next => { if (!selectedComment && !draftLocked) { setRange(next); setFeedbackAnchorMode('range'); } }} drawings={selectedComment ? selectedDrawings : drawings} onDrawingsChange={next => { if (!selectedComment && !draftLocked) setDrawings(next); }} editingLocked={busy || loadingFile || composerActive || layerDraftOpen || (!selectedComment && voiceAnchorLocked)} editingLockLabel={voiceAnchorLocked ? '음성의 구간·그림 고정 · 작성창에서 녹음 저장 상태를 확인하세요' : undefined} drawingHistoryKey={`${version.id}:draft:${drawingGeneration}`} onDrawingHistoryChange={setDrawingHistoryAvailable} annotationsReadOnly={Boolean(selectedComment)} annotationFrame={selectedComment ? projection?.contextFrame ?? undefined : drawingContext.current} onSelectComment={(comment, rangeIndex, frame) => selectComment(comment, rangeIndex, true, frame)} onDrawingCreate={frame => {drawingContext.current=frame;}} onCompose={() => composeAtPlayhead()} onInsertDrawings={!editingMode || selectedComment ? undefined : () => void insertDrawings()} imageOverlay={imageOverlay} compareVersion={compare ? previous : null}/></section>
       <aside className="request-rail" aria-label="댓글 패널">
         {!feedbackPanelOpen ? <div className="request-rail-tools"><button ref={feedbackExpandRef} type="button" className="rail-collapse-toggle feedback-panel-toggle" aria-label="댓글 패널 펼치기" aria-expanded={false} aria-controls="feedback-panel-content" disabled={composerActive || layerDraftOpen} title="댓글 패널 펼치기" onClick={toggleFeedbackPanel}><PanelRightOpen size={18}/></button></div> : null}
-        <div id="feedback-panel-content" className="request-rail-content" hidden={!feedbackPanelOpen}>{editingMode ? <LayerPanel version={version} originalVersion={data.versions.find(item => item.parentVersionId === null) ?? data.versions[0]} asset={data.asset} attachments={data.attachments} busy={busy || loadingFile || composerActive || Boolean(rendering)} onChange={onLayerChange} onDraftChange={setLayerDraftOpen} pendingChanges={data.ops} onSelectChange={op => { const comment = data.comments.find(item => item.id === op.commentId); if (comment) { selectComment(comment); setFeedbackRevealToken(value => value + 1); } }} onSeek={frame => { if (!selectedComment) draftFrame.current = frame; setCurrentFrame(frame); setFocusFrameToken(token => token + 1); }}/> : null}<RequestPanel headerActions={feedbackHeaderActions} keyboardEnabled={feedbackPanelOpen} editingMode={editingMode} revealToken={feedbackRevealToken} comments={data.comments} versions={data.versions} currentVersion={version} onSelectAuthored={selectAuthored} onDraftChange={setSupplementDraft} ops={data.ops} selectedId={selectedId} busy={busy || !!rendering || loadingFile || composerActive || layerDraftOpen} onSelect={selectComment} onOp={onOp} onInterpret={onInterpret} onPrepareContextBundle={onPrepareContextBundle} onSupplement={onSupplement} onEditComment={onEditComment} onDeleteComment={onDeleteComment} attachments={data.attachments} previewOpId={previewOpId} onPreviewOverlay={previewOverlay}/>{selectedComment ? <details className="saved-context-details" key={selectedComment.id}><summary>선택한 댓글 · 구간·마크업 재사용</summary><SavedRequestContext comment={selectedComment} projection={projection} drawingGroups={savedDrawingGroups} deletedDrawingCount={drawingProjections.filter(item => item.status === 'deleted').length} unavailableDrawingCount={drawingProjections.filter(item => item.status === 'unavailable').length} currentVersionNumber={version.number} selectedRangeIndex={selectedRangeIndex} hasDraft={draftPending} hasDrawingHistory={drawingHistoryAvailable} busy={busy || loadingFile || composerActive || layerDraftOpen} onRangeSelect={index => selectComment(selectedComment, index, true)} onCompose={composeFromSaved}/></details> : null}
+        <div id="feedback-panel-content" className="request-rail-content" hidden={!feedbackPanelOpen}>{editingMode ? <LayerPanel version={version} originalVersion={data.versions.find(item => item.parentVersionId === null) ?? data.versions[0]} asset={data.asset} attachments={data.attachments} busy={busy || loadingFile || composerActive || Boolean(rendering)} onChange={onLayerChange} onDraftChange={setLayerDraftOpen} pendingChanges={data.ops} onSelectChange={op => { const comment = data.comments.find(item => item.id === op.commentId); if (comment) { selectComment(comment); setFeedbackRevealToken(value => value + 1); } }} onSeek={frame => { if (!selectedComment) draftFrame.current = frame; setCurrentFrame(frame); setFocusFrameToken(token => token + 1); }}/> : null}<RequestPanel headerActions={feedbackHeaderActions} keyboardEnabled={feedbackPanelOpen} editingMode={editingMode} revealToken={feedbackRevealToken} comments={data.comments} versions={data.versions} currentVersion={version} onSelectAuthored={selectAuthored} onDraftChange={setSupplementDraft} ops={data.ops} selectedId={selectedId} busy={busy || !!rendering || loadingFile || composerActive || layerDraftOpen} onSelect={selectComment} onOp={onOp} onInterpret={onInterpret} onPrepareContextBundle={onPrepareContextBundle} onSupplement={onSupplement} onEditComment={onEditComment} onDeleteComment={onDeleteComment} attachments={data.attachments} previewOpId={previewOpId} onPreviewOverlay={previewOverlay} onTranscribe={data.capabilities.transcription ? onTranscribe : undefined} transcribingId={transcribingId}/>{selectedComment ? <details className="saved-context-details" key={selectedComment.id}><summary>선택한 댓글 · 구간·마크업 재사용</summary><SavedRequestContext comment={selectedComment} projection={projection} drawingGroups={savedDrawingGroups} deletedDrawingCount={drawingProjections.filter(item => item.status === 'deleted').length} unavailableDrawingCount={drawingProjections.filter(item => item.status === 'unavailable').length} currentVersionNumber={version.number} selectedRangeIndex={selectedRangeIndex} hasDraft={draftPending} hasDrawingHistory={drawingHistoryAvailable} busy={busy || loadingFile || composerActive || layerDraftOpen} onRangeSelect={index => selectComment(selectedComment, index, true)} onCompose={composeFromSaved}/></details> : null}
         <Composer onBeginWriting={() => selectedComment ? composeAtPlayhead(false) : workspacePlaybackRef.current?.pauseAndReadFrame()} anchorMode={selectedComment && !draftReturnable ? 'point' : feedbackAnchorMode} onAnchorModeChange={changeAnchorMode} onClearRange={() => changeAnchorMode('point')} editingMode={editingMode} key={version.id} range={range} currentFrame={selectedComment && draftReturnable ? draftFrame.current : currentFrame} drawingContextFrame={drawingContext.current} drawings={drawings} busy={busy || loadingFile || layerDraftOpen} textareaRef={textareaRef} onSubmit={onSubmit} onError={setError} onActivityChange={setComposerActive} onAnchorLockChange={setVoiceAnchorLocked} onDraftChange={setDraftContent} draftVersionId={version.id} durationFrames={version.durationFrames} onRestoreDraft={restoreDraftAnchor}/>
         <div className="interpreter-note"><Info size={14}/><span>{editingMode ? data.capabilities.interpreterLabel : '타임코드와 마크업을 댓글에 함께 저장합니다.'}</span></div></div></aside>
     </ResizableWorkspace>
@@ -427,9 +493,10 @@ export function App() {
     <VertexAudioDialog open={vertexAudioOpen} onClose={() => setVertexAudioOpen(false)}/>
     <VertexVideoDialog open={vertexVideoOpen} onClose={() => setVertexVideoOpen(false)}/>
     <PremiereExportDialog open={premiereOpen} busy={busy && premiereInFlight.current} result={premiereResult} error={premiereError} onClose={() => { if (!premiereInFlight.current) setPremiereOpen(false); }} onRetry={() => void exportPremiere()}/>
-    {error ? <div className="feedback error" role="alert"><span>{error}</span><button className="quiet" onClick={() => void load().then(() => setError('')).catch(e => setError((e as Error).message))}>다시 연결</button><button onClick={() => setError('')} aria-label="오류 메시지 닫기"><X size={16}/></button></div> : null}
-    {notice ? <div className="feedback notice" role="status"><span>{notice}</span>{undoDeleteId && notice === '피드백을 휴지통으로 옮겼습니다.' ? <button className="feedback-undo" disabled={busy} onClick={() => void onRestoreComment(undoDeleteId)}><RotateCcw size={14}/>되돌리기</button> : null}<button onClick={() => setNotice('')} aria-label="알림 닫기"><X size={16}/></button></div> : null}
-    {showAssets ? <div className="drawer-scrim" onClick={() => setShowAssets(false)}><section className="asset-drawer" role="dialog" aria-modal="true" aria-label="에셋 보관함" onClick={e => e.stopPropagation()}><div className="panel-heading"><h2>에셋 보관함</h2><button className="quiet" onClick={() => setShowAssets(false)} aria-label="에셋 보관함 닫기"><X size={18}/></button></div><p className="subtle">참고 자료와 영상에 넣을 에셋을 구분합니다.</p>{data.attachments.length === 0 ? <p>요청 작성 영역에서 이미지를 첨부하거나 음성을 녹음하세요.</p> : data.attachments.map(a => <a className="asset-row" href={a.mediaUrl} target="_blank" rel="noreferrer" key={a.id}>{a.mimeType.startsWith('image/') ? <img src={a.mediaUrl} alt=""/> : <FileIcon/>}<div><strong>{a.name}</strong><small>{a.role === 'reference' ? '스타일 참고' : a.role === 'insert' ? '영상에 삽입' : '편집 지시 음성'}</small></div></a>)}</section></div> : null}
+    {error ? <div className="feedback error" role="alert"><CircleAlert size={17} aria-hidden="true"/><span>{error}</span><button className="quiet" onClick={() => void load().then(() => setError('')).catch(e => setError((e as Error).message))}>다시 연결</button><button onClick={() => setError('')} aria-label="오류 메시지 닫기"><X size={16}/></button></div> : null}
+    {importProgress ? <ImportProgress className="app-import-progress" state={importProgress} onCancel={importProgress.stage === 'finishing' ? undefined : cancelImport}/> : null}
+    {notice ? <div className="feedback notice" role="status"><CircleCheck size={17} aria-hidden="true"/><span>{notice}</span>{undoDeleteId && notice === '피드백을 휴지통으로 옮겼습니다.' ? <button className="feedback-undo" disabled={busy} onClick={() => void onRestoreComment(undoDeleteId)}><RotateCcw size={14}/>되돌리기</button> : null}<button onClick={() => setNotice('')} aria-label="알림 닫기"><X size={16}/></button></div> : null}
+    {showAssets ? <div className="drawer-scrim" onClick={() => setShowAssets(false)}><section className="asset-drawer" role="dialog" aria-modal="true" aria-label="에셋 보관함" onClick={e => e.stopPropagation()}><div className="panel-heading"><h2>에셋 보관함</h2><button className="quiet" onClick={() => setShowAssets(false)} aria-label="에셋 보관함 닫기"><X size={18}/></button></div><p className="subtle">참고 자료와 영상에 넣을 에셋을 구분합니다.</p>{data.attachments.length === 0 ? <p>요청 작성 영역에서 이미지를 첨부하거나 음성을 녹음하세요.</p> : data.attachments.map(a => <a className="asset-row" href={a.mediaUrl} target="_blank" rel="noreferrer" key={a.id}>{a.mimeType.startsWith('image/') ? <img src={a.mediaUrl} alt=""/> : a.mimeType.startsWith('audio/') ? <FileAudio size={24}/> : <FileIcon/>}<div><strong>{a.name}</strong><small>{a.role === 'reference' ? '스타일 참고' : a.role === 'insert' ? '영상에 삽입' : editingMode ? '편집 지시 음성' : '음성 피드백'}</small></div></a>)}</section></div> : null}
   </div>;
 }
 function FileIcon() { return <Package size={24}/>; }

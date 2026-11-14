@@ -15,6 +15,19 @@ Gemini는 장면 관찰, 피드백 요약, 확인할 사항만 반환한다. 작
 
 기존 내보내기 자료의 `modelCalled:false`는 로컬 자료를 준비한 이력이다. Gemini 호출 이력은 별도 테스트 결과에 기록하며 기존 manifest를 덮어쓰지 않는다.
 
+## 형식 v2: 한 장 요약 우선
+
+2026-10-15부터 피드백 내보내기는 형식 v2([AI·도구용 전달 형식](AI전달형식.md))다. v2 자료에서는 기본으로 **피드백당 한 장 요약(`sheets/`)과 참고 이미지**만 보낸다. 한 장 요약의 칸마다 프레임·역할·위치·그림 표시 여부를 `scene_sheet` 바인딩으로 함께 보내고, 그림 좌표를 로컬에서 바꾼 위치 문장(`drawingDescriptions`)도 글로 보낸다.
+
+| 검증용 합성 영상의 피드백 3개 묶음 (로컬 준비, 호출 없음) | 이미지 | 요청 크기 |
+|---|---|---|
+| `--detail full` (이전과 같은 전체 스틸) | 16장 | 912KB |
+| 기본 `auto` → 한 장 요약 | 4장 | 236KB |
+
+같은 내용을 작은 칸으로 보는 것이므로, 작은 글씨나 세부가 필요하면 `--detail full`로 다시 확인한다. 한 장 요약 모드의 실제 Gemini 호출 결과와 토큰 수는 아직 측정하지 않았다. v1 자료(한 장 요약 없음)는 자동으로 전체 스틸을 보낸다.
+
+받아쓰기 글은 `--include-transcripts`를 붙일 때만 보낸다. 음성 파일은 어떤 경우에도 보내지 않는다. `--live`가 성공하면 `observations.json`을 함께 남긴다. 이 파일은 `npm run export -- --observations 경로`로 전달 자료에 붙일 수 있고, 모델 결과(`source: "model"`)로 따로 표시된다. 그 뒤 피드백이 바뀌면 `stale: true`로 표시한다.
+
 ## 실행
 
 프로젝트 루트의 `.env.local`에서 `GEMINI_API_KEY`와 `GEMINI_MODEL`을 읽는다. 형식은 [.env.example](../.env.example)을 참고한다. `.env.local`은 Git에서 제외하며 키 값을 로그나 결과에 넣지 않는다. 모델 기본값은 `gemini-3.5-flash-lite`이고 설정으로 바꿀 수 있다.
@@ -28,6 +41,9 @@ npm run test:gemini -- /path/to/export/manifest.json --live
 
 # 큰 묶음에서는 검토할 항목을 선택
 npm run test:gemini -- /path/to/export/manifest.json --comment-id feedback-id --live
+
+# 전체 스틸로 보기, 받아쓰기 글 포함
+npm run test:gemini -- /path/to/export/manifest.json --detail full --include-transcripts --live
 ```
 
 동일 호출을 자동 재시도하지 않는다. API 오류·제한·형식 불일치는 테스트 실패로 남긴다. 일반 `npm test`, 앱의 저장·내보내기는 Gemini를 호출하지 않는다. 이 테스트는 아직 앱의 ‘요청 해석’ 버튼에 연결된 기능이 아니다.
