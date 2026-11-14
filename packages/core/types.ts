@@ -19,14 +19,14 @@ export interface CommentSupplement { id: string; text: string; createdAt: string
 export type FeedbackCategory = 'video' | 'subtitle' | 'audio' | 'effect';
 export interface CommentRevision { id: string; text: string; sceneDescription?: string; editedAt: string }
 export interface Comment { id: string; versionId: string; frameIn: number; frameOut: number; contextFrame?: number; kind?: 'request' | 'note'; category?: FeedbackCategory; layerChange?: LayerChange; sceneDescription?: string; text: string; supplements?: CommentSupplement[]; revisions?: CommentRevision[]; drawings: Drawing[]; attachmentIds: string[]; voiceAssetId?: string; status: CommentStatus; createdAt: string; updatedAt?: string; deletedAt?: string; clarification?: string; sourceRanges: SourceRange[] }
-export interface EditOp { id: string; layerId?: string; layerChange?: LayerChange; commentId: string; versionId: string; type: OpType; frameIn: number; frameOut: number; sourceRanges: SourceRange[]; region?: Region; params: { factor?: number; text?: string; assetRef?: string; volume?: number; kind?: 'text' | 'image' | 'box' | 'drawing'; color?: string; drawings?: Drawing[] }; status: OpStatus; aiNote: string; createdAt: string; interpreter: 'local-rules' | 'anthropic' | 'manual' }
+export interface EditOp { id: string; layerId?: string; layerChange?: LayerChange; commentId: string; versionId: string; type: OpType; frameIn: number; frameOut: number; sourceRanges: SourceRange[]; region?: Region; params: { factor?: number; text?: string; assetRef?: string; volume?: number; kind?: 'text' | 'image' | 'box' | 'drawing'; color?: string; drawings?: Drawing[] }; status: OpStatus; aiNote: string; createdAt: string; interpreter: 'local-rules' | 'anthropic' | 'vertex' | 'manual' }
 export interface RenderJob { id: string; versionId: string; status: 'queued' | 'running' | 'completed' | 'failed' | 'canceled'; progress: number; cancelRequested?: boolean; error?: string; createdAt: string; completedAt?: string }
-export interface Capabilities { ffmpeg: boolean; interpreter: 'local-rules' | 'anthropic'; interpreterLabel: string; transcription: boolean; maxDurationSeconds: number; fps: 30; supportedOps: OpType[] }
+export interface Capabilities { ffmpeg: boolean; interpreter: 'local-rules' | 'anthropic' | 'vertex'; interpreterLabel: string; transcription: boolean; maxDurationSeconds: number; fps: 30; supportedOps: OpType[] }
 export interface AppState { project: Project; asset: Asset; versions: Version[]; comments: Comment[]; deletedComments?: Comment[]; ops: EditOp[]; jobs: RenderJob[]; attachments: Attachment[]; capabilities: Capabilities }
 export interface EmptyState { empty: true; capabilities: Capabilities }
 export type BootstrapState = AppState | EmptyState;
 export interface CreateComment { versionId: string; frameIn: number; frameOut?: number; contextFrame?: number; kind?: 'request' | 'note'; category?: FeedbackCategory; sceneDescription?: string; text: string; drawings?: Drawing[]; attachmentIds?: string[]; voiceAssetId?: string }
-export interface InterpretResult { comment: Comment; ops: EditOp[]; mode: 'local-rules' | 'anthropic'; clarification?: string }
+export interface InterpretResult { comment: Comment; ops: EditOp[]; mode: 'local-rules' | 'anthropic' | 'vertex'; clarification?: string }
 export interface ApiError { error: string; code?: string }
 
 /** Effective visual layers in one immutable rendered version, ordered from back to front. */

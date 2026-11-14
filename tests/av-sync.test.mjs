@@ -1,10 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
-import { run, ffmpegPath, probe, ingest, renderVideo } from '../apps/worker/engine.mjs';
+import { spawnSync } from 'node:child_process';
+import { run, ffmpegPath, ffprobePath, probe, ingest, renderVideo } from '../apps/worker/engine.mjs';
 
 const work = await mkdtemp(join(tmpdir(), 'video-interference-av-sync-'));
 const rate = 48000;
@@ -82,6 +83,26 @@ await test('legacy asset metadata probes the original offset and zero-audio sour
   const silentAsset = await ingest(silent, join(work, 'silent-proxy.mp4'), join(work, 'silent-thumb.jpg')); assert.equal(silentAsset.audioOffsetSeconds, 0);
   const silentOutput = join(work, 'silent-render.mp4'); await renderVideo({ asset: silentAsset, sourcePath: silent, ops: [], outputPath: silentOutput, workingDirectory: join(work, 'silent-render') });
   assert.ok(rms(await pcm(silentOutput, 'silent-render'), 0, 2.8) < 1, 'float normalization must continue to prevent silent DC offset');
+});
+
+await test('underreported video duration does not drop the final frame, with or without audio', async () => {
+  const source = await makeSource('underreported', 0, 0.3);
+  const silent = join(work, 'underreported-silent.mov');
+  await run(ffmpegPath, ['-y', '-hide_banner', '-loglevel', 'error', '-i', source, '-map', '0:v:0', '-an', '-c:v', 'copy', silent]);
+  // Keep the native decoder and actual frames; simulate ffprobe versions/MOV
+  // metadata that report the final frame PTS (89/30), not its end time (90/30).
+  const fakeProbe = join(work, 'ffprobe-underreported');
+  await writeFile(fakeProbe, `#!${process.execPath}\nconst { execFileSync } = require('node:child_process');\nconst args = process.argv.slice(2);\nconst result = JSON.parse(execFileSync(process.env.VI_TEST_REAL_FFPROBE, args, { encoding: 'utf8' }));\nif (args.at(-1) === process.env.VI_TEST_SOURCE) result.streams.find(s => s.codec_type === 'video').duration = String(89 / 30);\nprocess.stdout.write(JSON.stringify(result));\n`, { mode: 0o700 });
+  const childScript = `import { ingest } from './apps/worker/engine.mjs'; const [source, proxy, thumb] = process.argv.slice(1); console.log(JSON.stringify(await ingest(source, proxy, thumb)));`;
+  for (const [name, input] of [['audio', source], ['silent', silent]]) {
+    const proxy = join(work, `underreported-${name}-proxy.mp4`), thumb = join(work, `underreported-${name}-thumb.jpg`);
+    const child = spawnSync(process.execPath, ['--input-type=module', '-e', childScript, input, proxy, thumb], { cwd: process.cwd(), encoding: 'utf8', env: { ...process.env, FFMPEG_PATH: ffmpegPath, FFPROBE_PATH: fakeProbe, VI_TEST_REAL_FFPROBE: ffprobePath, VI_TEST_SOURCE: input } });
+    assert.equal(child.status, 0, child.stderr);
+    assert.equal(JSON.parse(child.stdout).durationFrames, 90);
+    const metadata = await probe(proxy);
+    assert.equal(Number(metadata.streams.find(stream => stream.codec_type === 'video').nb_frames), 90);
+    if (name === 'audio') await assertDuration(proxy, 90);
+  }
 });
 
 await rm(work, { recursive: true, force: true });

@@ -32,6 +32,27 @@ npm run test:gemini -- /path/to/export/manifest.json --comment-id feedback-id --
 
 동일 호출을 자동 재시도하지 않는다. API 오류·제한·형식 불일치는 테스트 실패로 남긴다. 일반 `npm test`, 앱의 저장·내보내기는 Gemini를 호출하지 않는다. 이 테스트는 아직 앱의 ‘요청 해석’ 버튼에 연결된 기능이 아니다.
 
+### 선택적 Vertex AI 경로
+
+`--vertex`를 명시하면 기존 테스트 요청을 Vertex AI의 프로젝트별 `generateContent`에 보낸다.
+기본 Gemini Developer API 경로는 유지한다. Vertex 호출 실패 시 다른 API로 자동 전환하지 않는다.
+`VERTEX_PROJECT_ID`와 `VERTEX_LOCATION`을 설정하고, `VERTEX_ACCESS_TOKEN`에는 해당 프로젝트에서
+Vertex AI 예측 권한을 가진 단기 OAuth 액세스 토큰을 현재 셸에만 설정한다. 토큰을 `.env.local`,
+코드, Git, 결과 보고서에 저장하지 않는다. 토큰 발급과 프로젝트 접근은 Google Cloud 인증 설정에 따른다.
+지역별 모델 제공과 실제 사용료·크레딧 적용은 별도로 확인해야 한다.
+
+```sh
+# 사전 검사만 수행하고 외부 전송 없음
+npm run test:gemini -- /path/to/export/manifest.json --vertex
+
+# 단기 토큰을 현재 셸에 설정한 뒤 명시적 호출 1회
+npm run test:gemini -- /path/to/export/manifest.json --vertex --live
+```
+
+이 경로도 선택한 피드백·스틸·그림·참고 이미지만 전송한다. 영상 및 음성 파일을 보내지 않으며,
+피드백 저장·내보내기, 승인과 렌더는 모델을 호출하지 않는다. 보고서에는 `provider: "vertex"`를
+기록하되 자격 증명은 기록하지 않는다. 전송할 자료·사용 조건을 확인하고 호출한다.
+
 ## 의미 검수
 
 자동 검사는 구조와 앵커 보존을 확인한다. 장면 이해의 정확도는 결과 문서를 따로 읽고 판단한다.

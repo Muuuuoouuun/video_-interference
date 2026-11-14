@@ -1,23 +1,29 @@
 import { spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
+import { accessSync, constants } from 'node:fs';
 import { mkdir, writeFile, access, stat, rename } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
-import { join, dirname, delimiter } from 'node:path';
+import { join, dirname } from 'node:path';
 import { drawingsSvg, assertStaticDrawingFrames } from './drawings.mjs';
 
 export const FPS = 30;
-
-/** Resolve a native media binary: explicit env override → PATH → common install locations (Homebrew first for the original macOS setup). */
-export function resolveMediaBinary(name, override, { pathEnv = process.env.PATH || '', fallbacks = ['/opt/homebrew/bin', '/usr/local/bin', '/usr/bin'], exists = existsSync } = {}) {
-  if (override) return override;
-  for (const directory of [...fallbacks.slice(0, 1), ...pathEnv.split(delimiter).filter(Boolean), ...fallbacks.slice(1)]) {
-    const candidate = join(directory, name);
-    if (exists(candidate)) return candidate;
+function mediaBinary(name, explicit) {
+  if (explicit) return explicit;
+  // Desktop launches on macOS may have a minimal PATH that omits Homebrew.
+  // Prefer PATH when available so Linux and user-installed versions work.
+  if (process.platform === 'darwin') {
+    const availableOnPath = (process.env.PATH || '').split(':').filter(Boolean).some(directory => {
+      try { accessSync(join(directory, name), constants.X_OK); return true; } catch { return false; }
+    });
+    if (!availableOnPath) {
+      const homebrewPath = join('/opt/homebrew/bin', name);
+      try { accessSync(homebrewPath, constants.X_OK); return homebrewPath; } catch { /* Let spawn report the missing binary. */ }
+    }
   }
   return name;
 }
-export const ffmpegPath = resolveMediaBinary('ffmpeg', process.env.FFMPEG_PATH);
-export const ffprobePath = resolveMediaBinary('ffprobe', process.env.FFPROBE_PATH);
+
+export const ffmpegPath = mediaBinary('ffmpeg', process.env.FFMPEG_PATH);
+export const ffprobePath = mediaBinary('ffprobe', process.env.FFPROBE_PATH);
 
 const canceledError = () => Object.assign(new Error('렌더를 취소했습니다.'), { name: 'AbortError' });
 const checkCancellation = signal => { if (signal?.aborted) throw canceledError(); };
@@ -97,7 +103,12 @@ export async function ingest(sourcePath, previewPath, thumbnailPath) {
   const audioOffsetSeconds = audioOffsetFromInfo(info);
   const args = ['-y', '-hide_banner', '-loglevel', 'error', '-i', sourcePath, '-map', '0:v:0', '-map', '0:a:0?', '-vf', "setpts=PTS-STARTPTS,fps=30,scale=w='min(1920,iw)':h='min(1080,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1", '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p', '-g', '15', '-movflags', '+faststart'];
   if (hasAudio) args.push('-af', `${alignedAudio(audioOffsetSeconds)},apad`, '-c:a', 'aac', '-ar', '48000', '-ac', '2', '-shortest');
-  args.push('-t', String(duration), previewPath);
+  // Trust the decoder's actual end of video, not the container's reported
+  // duration: some MOV/FFmpeg combinations report only the last frame PTS,
+  // which is one frame short and would truncate that frame with `-t`.
+  // With audio, `-shortest` above stops the padded track at video EOF.
+  // Keep a fixed hard ceiling even if input metadata understates its length.
+  args.push('-t', '600', previewPath);
   await run(ffmpegPath, args);
   const normalized = await probe(previewPath);
   const canonical = normalized.streams.find(stream => stream.codec_type === 'video');
