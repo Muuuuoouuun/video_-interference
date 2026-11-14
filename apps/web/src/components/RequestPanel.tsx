@@ -7,6 +7,7 @@ import type { FeedbackSort } from '../../../../packages/core/feedback-list.mjs';
 import { projectDrawings } from '../../../../packages/core/drawing-anchors.mjs';
 import { time, duration } from '../format';
 import { AttachmentGallery } from './AttachmentGallery';
+import { SubmitTextarea } from './SubmitTextarea';
 import { feedbackCategory, FEEDBACK_CATEGORY_LABELS } from '../../../../packages/core/feedback-category.mjs';
 import { FeedbackCategorySelect } from './FeedbackCategory';
 import './RequestPanel.css';
@@ -151,13 +152,14 @@ export const RequestPanel = memo(function RequestPanel({ headerActions, keyboard
   const nextComment = visible[selectedVisibleIndex + 1];
   function selectFromList(comment: Comment) { localSelection.current = comment.id; onSelect(comment); }
   function resetListFilters() { setSearchQuery(''); setFilter('all'); searchRef.current?.focus(); }
-  function moveToComment(comment: Comment | undefined) {
+  function moveToComment(comment: Comment | undefined, focusCard = true) {
     if (!comment || navigationBusy || commentInFlight.current || supplementInFlight.current) return;
     selectFromList(comment);
     requestAnimationFrame(() => {
       const card = document.getElementById(`request-${comment.id}`);
       card?.scrollIntoView({ block: 'nearest' });
-      card?.querySelector<HTMLButtonElement>('.request-location')?.focus({ preventScroll: true });
+      // Stepping from the player keeps focus there, so Space still plays and C still writes.
+      if (focusCard) card?.querySelector<HTMLButtonElement>('.request-location')?.focus({ preventScroll: true });
     });
   }
   const filters = editingMode ? ([['all','전체'],['awaiting','해석 대기'],['pending','승인 대기'],['applied','적용됨']] as const) : ([['all','전체'],['feedback','피드백'],['notes','메모']] as const);
@@ -215,15 +217,20 @@ export const RequestPanel = memo(function RequestPanel({ headerActions, keyboard
   }
   useEffect(() => {
     const handleKey = (event: KeyboardEvent) => {
-      if (!keyboardEnabled || event.defaultPrevented || event.isComposing || event.keyCode === 229 || event.repeat || event.metaKey || event.ctrlKey || busy || commentInFlight.current) return;
+      // Text fields are excluded by target below, so an active Hangul input source never disables these keys.
+      if (!keyboardEnabled || event.defaultPrevented || event.metaKey || event.ctrlKey || busy || commentInFlight.current) return;
       const target = event.target instanceof Element ? event.target : null;
       if (target instanceof HTMLElement && target.isContentEditable || target?.closest('input, textarea, select, audio, video, [contenteditable="true"], [role="textbox"], dialog, [role="dialog"]') || document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')) return;
-      if (event.altKey) {
-        if (!event.shiftKey && panelRef.current?.contains(document.activeElement) && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
-          event.preventDefault(); moveToComment(event.key === 'ArrowUp' ? previousComment : nextComment);
-        }
+      if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+        // ↑ / ↓ steps through the list from anywhere outside a control that uses the arrows itself. Alt keeps working.
+        if (event.shiftKey || !event.altKey && target?.closest('[role="slider"], [role="listbox"], [role="menu"], [role="radiogroup"], [role="tablist"], summary, .vi-details')) return;
+        const inList = Boolean(panelRef.current?.contains(document.activeElement));
+        const step = event.key === 'ArrowUp' ? previousComment ?? (selectedVisibleIndex < 0 ? visible.at(-1) : undefined) : nextComment;
+        event.preventDefault();
+        moveToComment(step, inList);
         return;
       }
+      if (event.altKey || event.repeat) return;
       const focusedCard = target?.closest('article[data-feedback-id]');
       const focusedId = focusedCard && panelRef.current?.contains(focusedCard) ? focusedCard.getAttribute('data-feedback-id') : null;
       const comment = visible.find(item => item.id === (focusedId ?? selectedId));
@@ -341,16 +348,16 @@ export const RequestPanel = memo(function RequestPanel({ headerActions, keyboard
           {editingMode && !isNote ? <p className="rq-authored-target">{isLayerChange ? '수정·제거 승인은' : '해석·승인은'} {authored ? `작성 v${authored.number}` : '작성 버전'} 기준입니다.{differentVersion && authored ? ' 실행하려면 해당 버전을 여세요.' : ''}</p> : null}
           {comment.kind === 'note' ? <span className="request-kind-note"><FileText size={12}/>보관된 메모</span> : null}
           {!commentEditorOpen && comment.sceneDescription ? <div className="rq-scene-description"><span>장면 내용 · 직접 작성</span><p>{comment.sceneDescription}</p></div> : null}
-          {!commentEditorOpen ? <p className="request-text" onDoubleClick={() => startCommentEdit(comment)} title={hasApplied || isLayerChange ? undefined : '두 번 클릭해서 수정'}>{comment.text || (comment.voiceAssetId ? '음성 지시가 저장되었습니다.' : comment.attachmentIds.length ? '첨부 자료가 저장되었습니다.' : comment.sceneDescription ? '장면 기록' : '그림으로 남긴 피드백')}</p> : <form className="rq-comment-editor" aria-label="저장된 피드백 수정" onSubmit={event => { event.preventDefault(); void saveCommentEdit(comment); }} onKeyDown={event => { if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return; if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); if (canSaveEdit) void saveCommentEdit(comment); } else if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); cancelCommentEdit(comment.id); } }}>
+          {!commentEditorOpen ? <p className="request-text" onDoubleClick={() => startCommentEdit(comment)} title={hasApplied || isLayerChange ? undefined : '두 번 클릭해서 수정'}>{comment.text || (comment.voiceAssetId ? '음성 지시가 저장되었습니다.' : comment.attachmentIds.length ? '첨부 자료가 저장되었습니다.' : comment.sceneDescription ? '장면 기록' : '그림으로 남긴 피드백')}</p> : <form className="rq-comment-editor" aria-label="저장된 피드백 수정" onSubmit={event => { event.preventDefault(); void saveCommentEdit(comment); }} onKeyDown={event => { if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return; if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); cancelCommentEdit(comment.id); } }}>
             <div className="rq-editor-heading"><PencilLine size={14}/><strong>피드백 수정</strong><span>시간·그림 유지</span></div>
             {!isNote ? <FeedbackCategorySelect value={commentDraft.category} label="수정할 피드백 분야" disabled={supplementBusy} onChange={value => { if (value !== 'note') setCommentDrafts(drafts => ({ ...drafts, [comment.id]: { ...drafts[comment.id], category: value } })); }}/> : null}
             <label htmlFor={`comment-scene-${comment.id}`}>장면 내용 <span>선택</span></label>
-            <textarea id={`comment-scene-${comment.id}`} className="rq-scene-editor" value={commentDraft.sceneDescription} maxLength={500} disabled={supplementBusy} placeholder="이때 영상에 어떤 내용이 나오나요?" onChange={event => { const sceneDescription = event.target.value; setCommentDrafts(drafts => ({ ...drafts, [comment.id]: { ...drafts[comment.id], sceneDescription } })); setFailedCommentId(null); }}/>
+            <SubmitTextarea rows={1} maxHeight={96} onSubmit={() => { if (canSaveEdit) void saveCommentEdit(comment); }} id={`comment-scene-${comment.id}`} className="rq-scene-editor" value={commentDraft.sceneDescription} maxLength={500} disabled={supplementBusy} placeholder="이때 영상에 어떤 내용이 나오나요?" onChange={event => { const sceneDescription = event.target.value; setCommentDrafts(drafts => ({ ...drafts, [comment.id]: { ...drafts[comment.id], sceneDescription } })); setFailedCommentId(null); }}/>
             <label htmlFor={`comment-text-${comment.id}`}>{isNote ? '메모 내용' : '편집 피드백'}</label>
-            <textarea id={`comment-text-${comment.id}`} value={commentDraft.text} maxLength={5000} disabled={supplementBusy} placeholder="어떤 부분을 어떻게 바꿀까요?" onChange={event => { const text = event.target.value; setCommentDrafts(drafts => ({ ...drafts, [comment.id]: { ...drafts[comment.id], text } })); setFailedCommentId(null); }}/>
+            <SubmitTextarea rows={2} maxHeight={220} onSubmit={() => { if (canSaveEdit) void saveCommentEdit(comment); }} aria-keyshortcuts="Enter" id={`comment-text-${comment.id}`} value={commentDraft.text} maxLength={5000} disabled={supplementBusy} placeholder="어떤 부분을 어떻게 바꿀까요?" onChange={event => { const text = event.target.value; setCommentDrafts(drafts => ({ ...drafts, [comment.id]: { ...drafts[comment.id], text } })); setFailedCommentId(null); }}/>
             {related.length > 0 && (commentDraft.text !== commentDraft.originalText || commentDraft.sceneDescription !== commentDraft.originalSceneDescription) ? <p className="rq-supplement-approval">수정하면 기존 해석과 승인을 해제합니다.</p> : null}
             {failedCommentId === comment.id ? <p className="rq-supplement-error" role="alert">저장하지 못했습니다. 수정한 내용은 유지됩니다.</p> : null}
-            <div className="rq-editor-footer"><span>⌘ / Ctrl + Enter 저장</span><div><button type="button" className="quiet" disabled={supplementBusy} onClick={() => cancelCommentEdit(comment.id)}>취소</button><button type="submit" className="outline-mint" disabled={supplementBusy || !canSaveEdit}>{savingCommentId === comment.id ? <LoaderCircle size={13} className="spinning"/> : <Check size={13}/>}수정 저장</button></div></div>
+            <div className="rq-editor-footer"><span><kbd>Enter</kbd> 저장 · <kbd>Shift</kbd>+<kbd>Enter</kbd> 줄바꿈 · <kbd>Esc</kbd> 취소</span><div><button type="button" className="quiet" disabled={supplementBusy} onClick={() => cancelCommentEdit(comment.id)}>취소</button><button type="submit" className="outline-mint" disabled={supplementBusy || !canSaveEdit}>{savingCommentId === comment.id ? <LoaderCircle size={13} className="spinning"/> : <Check size={13}/>}수정 저장</button></div></div>
           </form>}
           {supplements.length > 0 ? <ol className="rq-supplement-history" aria-label={isNote ? '메모 보완 기록' : '추가 지시 기록'}>{supplements.map((supplement, supplementIndex) => <li key={supplement.id}><div><span>{isNote ? '메모 보완' : '추가 지시'} {supplementIndex + 1}</span><time dateTime={supplement.createdAt}>{supplementTime(supplement.createdAt)}</time></div><p>{supplement.text}</p></li>)}</ol> : null}
           <AttachmentGallery compact disabled={busy} onTranscribe={onTranscribe} transcribingId={transcribingId} attachments={attachmentsByComment.get(comment.id)!}/>
@@ -388,7 +395,7 @@ export const RequestPanel = memo(function RequestPanel({ headerActions, keyboard
           {hasApplied ? <p className="rq-comment-guidance">{editingMode && related.some(op => op.type === 'overlay' || op.type === 'subtitle') ? '자막·그래픽 변경은 현재 버전의 ‘적용된 자막·그래픽’에서 요청하세요.' : '이미 적용된 요청입니다. 변경하려면 새 요청을 남겨 주세요.'}</p> : showInterpret && hasApproved ? <p className="rq-comment-guidance">승인된 명령이 있습니다. 승인을 취소하거나 지시를 보완한 뒤 다시 해석하세요.</p> : editingMode && supplements.length > 0 && !isNote && (comment.status === 'received' || related.length === 0) ? <p className="rq-comment-guidance">추가 지시가 저장되었습니다. 요청 해석을 눌러 편집 명령을 준비하세요.</p> : null}
           {!isLayerChange && supplementing === comment.id ? <form id={`supplement-form-${comment.id}`} className="rq-supplement-form" onSubmit={event => { event.preventDefault(); void saveSupplement(comment, hasApplied); }}>
             <label htmlFor={`supplement-${comment.id}`}>{isNote ? '메모 보완' : '피드백 보완'}</label>
-            <textarea id={`supplement-${comment.id}`} aria-label={isNote ? '메모 보완 내용' : '추가 편집 지시 내용'} value={supplementDrafts[comment.id] ?? ''} maxLength={5000} disabled={supplementBusy || hasApplied} placeholder={isNote ? '기존 메모에 덧붙일 내용을 입력하세요.' : '어떤 부분을 어떻게 바꿀지 더 알려주세요.'} onChange={event => { const value = event.target.value; setSupplementDrafts(drafts => ({ ...drafts, [comment.id]: value })); setFailedSupplementId(null); }} onKeyDown={event => { if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return; if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); void saveSupplement(comment, hasApplied); } else if (event.key === 'Escape' && !supplementBusy) { event.preventDefault(); event.stopPropagation(); cancelSupplement(comment.id); } }} />
+            <SubmitTextarea rows={2} maxHeight={176} onSubmit={() => void saveSupplement(comment, hasApplied)} aria-keyshortcuts="Enter" id={`supplement-${comment.id}`} aria-label={isNote ? '메모 보완 내용' : '추가 편집 지시 내용'} value={supplementDrafts[comment.id] ?? ''} maxLength={5000} disabled={supplementBusy || hasApplied} placeholder={isNote ? '기존 메모에 덧붙일 내용을 입력하세요.' : '어떤 부분을 어떻게 바꿀지 더 알려주세요.'} onChange={event => { const value = event.target.value; setSupplementDrafts(drafts => ({ ...drafts, [comment.id]: value })); setFailedSupplementId(null); }} onKeyDown={event => { if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return; if (event.key === 'Escape' && !supplementBusy) { event.preventDefault(); event.stopPropagation(); cancelSupplement(comment.id); } }} />
             {hasApproved ? <p className="rq-supplement-approval">추가 지시를 저장하면 이전 승인이 해제됩니다.</p> : null}
             {!hasApplied ? <p className="rq-supplement-help">{isNote ? '원문을 유지하고 보완 기록으로 저장합니다.' : editingMode ? '원문을 유지합니다. 저장 후 요청 해석을 눌러 주세요.' : '원문과 보완 내용을 함께 전달 자료에 담습니다.'}</p> : null}
             {failedSupplementId === comment.id ? <p className="rq-supplement-error" role="alert">보완 내용을 저장하지 못했습니다. 내용을 유지했으니 다시 시도해 주세요.</p> : null}

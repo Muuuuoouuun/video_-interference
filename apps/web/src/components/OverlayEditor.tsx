@@ -1,4 +1,5 @@
 import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { shortcutKey } from '../../../../packages/core/shortcut-key.mjs';
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { ArrowDownToLine, ArrowUpToLine, ChevronDown, ChevronLeft, Copy, SlidersHorizontal, ArrowUpRight, Circle, CornerUpLeft, CornerUpRight, Eraser, MousePointer2, Pencil, Plus, RotateCcw, Slash, Square, Trash2, Type, X } from 'lucide-react';
@@ -380,15 +381,15 @@ export const OverlayEditor = memo(function OverlayEditor({ drawings, currentFram
 
     const handleKey = (event: KeyboardEvent) => {
       const current = latestRef.current;
-      if (event.defaultPrevented || event.isComposing || event.keyCode === 229 || !activeRef.current || current.blocked || current.readOnly) return;
+      if (event.defaultPrevented || !activeRef.current || current.blocked || current.readOnly) return;
       const target = event.target as HTMLElement | null;
+      // Text entry is excluded here, so composition state alone never blocks a tool or undo shortcut.
       if (target?.closest('input, textarea, select, [contenteditable="true"]')) return;
       if (target && target !== document.body && !target.closest(`[data-overlay-owner="${ownerId}"]`)) return;
-      const key = event.key.toLowerCase();
+      // The typed letter on Latin layouts; the physical key under a Hangul input source (also for ⌘/Ctrl + Z, D, Y).
+      const key = shortcutKey(event);
       const modifier = event.metaKey || event.ctrlKey;
-      // Physical keys also work with a Korean keyboard layout, outside text input.
-      const toolKey = /^Key[A-Z]$/.test(event.code) ? event.code.slice(3).toLowerCase() : key;
-      const shortcutTool = !modifier && !event.altKey ? TOOL_OPTIONS.find(item => item.shortcut.toLowerCase() === toolKey) : undefined;
+      const shortcutTool = !modifier && !event.altKey ? TOOL_OPTIONS.find(item => item.shortcut.toLowerCase() === key) : undefined;
       if (shortcutTool) {
         chooseTool(shortcutTool.id); svgRef.current?.focus({ preventScroll: true });
         event.preventDefault(); event.stopPropagation(); return;
@@ -418,7 +419,7 @@ export const OverlayEditor = memo(function OverlayEditor({ drawings, currentFram
         if (session.updateGroup(next)) { emit(session.present); setHistoryFrameHint(null); }
         handled = true;
       } else if (!modifier && !event.altKey) {
-        if (toolKey === 'd') { chooseTool(current.tool === 'rect' ? 'select' : 'rect'); handled = true; }
+        if (key === 'd') { chooseTool(current.tool === 'rect' ? 'select' : 'rect'); handled = true; }
       }
       if (handled) { event.preventDefault(); event.stopPropagation(); }
     };

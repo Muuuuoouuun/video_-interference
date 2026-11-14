@@ -547,3 +547,41 @@ dialog[open]::backdrop { animation: vi-fade-in var(--motion-base) var(--ease-out
 .last-saved-note { color: var(--text-secondary); }
 .last-saved-note svg { color: #2f9a6f; }
 .last-saved-note strong { font-family: var(--time-font); font-weight: 600; color: var(--text); }
+
+/* One-screen review layout · 2026-11-14
+   The page never scrolls. The feedback list scrolls on its own while the composer stays pinned,
+   and the detailed timeline dock fits its default height without an inner scrollbar. */
+@media (min-width: 901px) {
+  .editor-layout > .request-rail { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+  .request-rail .request-rail-content { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+  .request-rail .request-panel { flex: 1 1 0; min-height: 0; grid-template-rows: auto minmax(0, 1fr); }
+  .request-rail .request-list { min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+  .request-rail .saved-context-details, .request-rail .composer-wrap, .request-rail .interpreter-note { flex: 0 0 auto; }
+  /* A long draft or many attachments scroll inside the composer; the list always keeps room above it. */
+  .request-rail .composer-wrap { max-height: min(58dvh, calc(100dvh - 300px)); }
+  .request-rail .layer-panel { flex: 0 1 auto; max-height: 38%; overflow-y: auto; }
+}
+.vi-selection .vi-selection-actions { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+.vi-selection .vi-compose-button { min-height: 28px; padding: 3px 9px; white-space: nowrap; }
+.vi-selection .vi-compose-button kbd { padding: 0 4px; border: 1px solid var(--accent-border); border-radius: 3px; background: var(--accent-soft); font: inherit; font-size: 11px; line-height: 1.5; }
+.vi-directing-dock[data-compact="false"] > .vi-timeline-area { padding-top: 2px; }
+.vi-workspace .vi-selection { padding: 5px 0; gap: 6px 10px; }
+.vi-selection .vi-time-field, .vi-selection .vi-point-time { min-height: 28px; }
+.vi-selection .vi-time-field input, .vi-selection .vi-time-value { padding: 3px 0; }
+.vi-workspace .vi-selection .vi-range-clear, .vi-workspace .vi-selection .vi-range-start { min-height: 28px; padding: 3px 8px; }
+.vi-workspace:not([data-timeline-simple="true"], [data-timeline-compact="true"]) .vi-timeline { height: 52px; }
+.vi-workspace:not([data-timeline-simple="true"], [data-timeline-compact="true"]) .vi-marker-rail { margin: 0 0 2px; }
+.vi-details .vi-details-toggle { min-height: 28px; padding: 3px 10px; }
+.vi-overlay-controls .oe-toolbar:empty { display: none; }
+.vi-workspace:not([data-timeline-simple="true"], [data-timeline-compact="true"]) .vi-timeline-ruler { height: 22px; }
+
+/* Compact writing · 2026-11-14
+   Text boxes start at the height of what they hold and grow with the text; Enter saves. */
+.composer .composer-feedback-field > textarea { min-height: 36px; max-height: 176px; resize: none; field-sizing: content; }
+.composer .composer-save-shortcut { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; }
+.composer .composer-save-shortcut kbd, .rq-editor-footer kbd { padding: 0 4px; border: 1px solid var(--border-strong); border-radius: 3px; color: var(--text-secondary); background: var(--surface-muted); font: inherit; font-size: 11px; line-height: 1.5; }
+.rq-comment-editor textarea { min-height: 56px; max-height: 220px; resize: none; }
+.rq-comment-editor textarea.rq-scene-editor { min-height: 34px; max-height: 96px; }
+.rq-supplement-form textarea { min-height: 56px; max-height: 176px; resize: none; }
+.rq-editor-footer > span { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 3px; font-size: 11px; }
+@media (min-width: 901px) { .request-rail .composer .composer-feedback-field > textarea { min-height: 36px; } }

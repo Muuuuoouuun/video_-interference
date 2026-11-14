@@ -7,6 +7,7 @@ import { mapFrameBetweenVersions, projectComment } from '../../../../packages/co
 import { createRangePlaybackController } from '../../../../packages/core/range-playback.mjs';
 import type { PlaybackCommand } from '../../../../packages/core/range-playback.mjs';
 import { createTimelineRangeGesture, markTimelineRange } from '../../../../packages/core/timeline-range.mjs';
+import { shortcutKey } from '../../../../packages/core/shortcut-key.mjs';
 import type { TimelineRangeGesture } from '../../../../packages/core/timeline-range.mjs';
 import { OverlayEditor } from './OverlayEditor';
 import { ImagePlacementOverlay } from './ImagePlacementOverlay';
@@ -418,12 +419,13 @@ export function VideoWorkspace({ version, versions, asset, comments, attachments
   useEffect(() => {
     const handleKey = (event: KeyboardEvent) => {
       const element = event.target as HTMLElement | null;
-      if (event.defaultPrevented || event.isComposing || event.keyCode === 229 || element?.closest('input, textarea, select, audio, video, [contenteditable], dialog, [role="dialog"]') || event.metaKey || event.ctrlKey || event.altKey) return;
+      // Text fields are excluded by target, so a Hangul input source (key 'ㅊ', or 'Process' with keyCode 229) still reaches the shortcuts.
+      if (event.defaultPrevented || element?.closest('input, textarea, select, audio, video, [contenteditable], dialog, [role="dialog"]') || event.metaKey || event.ctrlKey || event.altKey) return;
       if (element?.closest('button, summary') && (event.code === 'Space' || event.key === 'Enter')) return;
-      if (event.repeat && !['ArrowLeft', 'ArrowRight', '+', '=', '-', 'j', 'l'].includes(event.key)) return;
+      const key = shortcutKey(event);
+      if (event.repeat && !['arrowleft', 'arrowright', '+', '=', '-', 'j', 'l'].includes(key)) return;
       const actions = keyboardActionsRef.current;
       if (actions.editingLocked) return;
-      const key = event.key.toLowerCase();
       if (event.code === 'Space' || key === 'k') { event.preventDefault(); actions.togglePlayback(); }
       else if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
         event.preventDefault(); actions.seekFrame(currentFrameRef.current + (event.key === 'ArrowRight' ? 1 : -1) * (event.shiftKey ? FPS : 1));
@@ -441,9 +443,9 @@ export function VideoWorkspace({ version, versions, asset, comments, attachments
       else if (key === ',' || key === '.') { event.preventDefault(); actions.seekMarker(key === '.' ? 1 : -1); }
       else if (key === 'i' && !actions.annotationsReadOnly) {
         event.preventDefault(); actions.markRange('in');
-      } else if (event.key.toLowerCase() === 'o' && !actions.annotationsReadOnly) {
+      } else if (key === 'o' && !actions.annotationsReadOnly) {
         event.preventDefault(); actions.markRange('out');
-      } else if (event.key.toLowerCase() === 'c') { event.preventDefault(); actions.onCompose(); }
+      } else if (key === 'c') { event.preventDefault(); actions.onCompose(); }
     };
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
@@ -633,15 +635,12 @@ export function VideoWorkspace({ version, versions, asset, comments, attachments
         </div>
         </TimelineSeekSurface>
         <div id={timelineContentId} hidden={compactTimeline}>
-        <TimelineSelection key={`${version.id}:${selectedCommentId ?? 'draft'}`} frame={frame} frameIn={safeIn} frameOut={safeOut} durationFrames={durationFrames} active={hasActiveRange} available={rangeAvailable} readOnly={annotationsReadOnly} locked={editingLocked} mediaError={mediaError} onChange={onRangeChange} onMark={markRange} onStart={startRange} onClear={onRangeClear ? clearRange : undefined}/>
+        <TimelineSelection key={`${version.id}:${selectedCommentId ?? 'draft'}`} frame={frame} frameIn={safeIn} frameOut={safeOut} durationFrames={durationFrames} active={hasActiveRange} available={rangeAvailable} readOnly={annotationsReadOnly} locked={editingLocked} mediaError={mediaError} onChange={onRangeChange} onMark={markRange} onStart={startRange} onClear={onRangeClear ? clearRange : undefined}
+          trailing={<button type="button" className="vi-compose-button" disabled={editingLocked || !canCompose} onClick={() => void composeFromViewer()} title={`${composeLabel} (C)`} aria-keyshortcuts="C"><Plus size={15} aria-hidden="true"/><span>{composeLabel}</span><kbd aria-hidden="true">C</kbd></button>}/>
         {!compactTimeline && !simpleTimeline ? <TimelineDetails comments={comments} versions={versions} version={version} attachments={attachments} selectedId={selectedCommentId} selectedRangeIndex={selectedRangeIndex} disabled={editingLocked} onSelect={selectDetail}/> : null}
         </div>
       </div>
 
-      <div className="vi-workspace-bottom" hidden={compactTimeline || simpleTimeline}>
-        <span className="vi-drawing-contract">그림은 시간별 피드백에 함께 저장됩니다.</span>
-        <button className="vi-compose-button" disabled={editingLocked || !canCompose} onClick={() => void composeFromViewer()} title="현재 시점이나 선택 구간에 피드백 작성 (C)"><Plus size={16} />{composeLabel}</button>
-      </div>
       <div className="vi-shortcut-note"><span><kbd>Space</kbd> 재생</span><span><kbd>←</kbd><kbd>→</kbd> 프레임</span><span><kbd>I</kbd><kbd>O</kbd> 구간</span><span><kbd>C</kbd> 피드백</span><span><kbd>B</kbd> 마커</span><span className="vi-frame-precision">30 fps 기준 · OUT 제외</span></div>
       </div>
       </VerticalWorkspaceLayout>

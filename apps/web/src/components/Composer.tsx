@@ -9,15 +9,16 @@ import { drawingFrame, groupDrawings } from '../../../../packages/core/drawing-a
 import { IMAGE_ATTACHMENT_LIMIT, VOICE_MAX_BYTES, VOICE_MAX_SECONDS, commentAttachmentInput, splitAttachmentFiles } from '../../../../packages/core/comment-attachments.mjs';
 import { COMPOSER_DRAFT_KEY, decodeComposerDraft, encodeComposerDraft, type ComposerDraft, type ComposerDraftAnchor } from '../../../../packages/core/composer-draft.mjs';
 import { AttachmentGallery } from './AttachmentGallery';
+import { SubmitTextarea } from './SubmitTextarea';
 import { FeedbackCategoryChips } from './FeedbackCategory';
 import './Composer.css';
 const duration = (seconds: number) => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
 const PLACEHOLDERS: Record<FeedbackCategory | 'note', string> = {
-  video: '어떻게 고칠지 적어 주세요 (예: 다른 컷으로 바꿔 주세요)',
-  subtitle: '어떻게 고칠지 적어 주세요 (예: 오타 수정, 자막을 아래로)',
-  audio: '어떻게 고칠지 적어 주세요 (예: 배경음을 줄이고 목소리를 키워 주세요)',
-  effect: '어떻게 고칠지 적어 주세요 (예: 전환 효과를 더 짧게)',
-  note: '이 장면에 기억해 둘 내용을 적어 주세요.',
+  video: '어떻게 고칠까요? (예: 다른 컷으로 교체)',
+  subtitle: '어떻게 고칠까요? (예: 오타 수정, 자막 아래로)',
+  audio: '어떻게 고칠까요? (예: 배경음 줄이기)',
+  effect: '어떻게 고칠까요? (예: 전환을 더 짧게)',
+  note: '이 장면에 기억해 둘 내용',
 };
 export interface RequestAnchor { in: number; out: number; contextFrame?: number; drawings?: Drawing[] }
 export interface RequestOptions { kind: 'request' | 'note'; category?: FeedbackCategory; interpretNow: boolean; sceneDescription?: string }
@@ -198,7 +199,7 @@ export function Composer({ range, currentFrame, drawingContextFrame, drawings, b
     </div>
     {drawings.length > 0 ? <div className="composer-drawing-context"><PencilLine size={12}/><span>그림 {drawings.length}개 · {drawingGroups.length}개 장면{drawingGroups.some(group => group.frame < displayedRange.in || group.frame >= displayedRange.out) ? ' · 다른 시점의 참고 그림 포함' : ''}</span></div> : null}
     <div className="composer-category-row"><FeedbackCategoryChips value={kind === 'note' ? 'note' : category} disabled={busy || saving || recording || requestingMicrophone || uploading} onChange={value => { if (value === 'note') setKind('note'); else { setKind('request'); setCategory(value); } }}/></div>
-    <label className="composer-feedback-field"><textarea disabled={busy || saving} ref={textareaRef} aria-label={kind === 'note' ? '메모 내용' : '피드백 내용'} placeholder={PLACEHOLDERS[kind === 'note' ? 'note' : category]} maxLength={5000} value={text} onFocus={() => onBeginWriting?.()} onChange={event => setText(event.target.value)} onKeyDown={event => { if (!event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229 && !event.repeat && (event.metaKey || event.ctrlKey) && event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); void submit(); } }}/></label>
+    <label className="composer-feedback-field"><SubmitTextarea rows={1} maxHeight={176} onSubmit={() => void submit()} onEscape={() => textareaRef.current?.blur()} aria-keyshortcuts="Enter" disabled={busy || saving} ref={textareaRef} aria-label={kind === 'note' ? '메모 내용' : '피드백 내용'} placeholder={PLACEHOLDERS[kind === 'note' ? 'note' : category]} maxLength={5000} value={text} onFocus={() => onBeginWriting?.()} onChange={event => setText(event.target.value)}/></label>
     <AttachmentGallery attachments={attachments} disabled={busy || saving || uploading || recording || requestingMicrophone || Boolean(pendingVoice)} onRemove={id => setAttachments(items => items.filter(item => item.id !== id))}/>
     {uploadingImage ? <div className="composer-upload-status" role="status"><LoaderCircle size={14} className="spinning"/>이미지를 첨부하고 있습니다…</div> : null}
     {recording || requestingMicrophone ? <div className={`composer-voice-active${recording ? ' is-recording' : ''}`} role="status"><span>{recording ? <span className="composer-rec-dot" aria-hidden="true"/> : <LoaderCircle size={14} className="spinning"/>}{recording ? <>녹음 중 <strong className="composer-rec-time" aria-label={`녹음 ${duration(recordSeconds)}, 최대 ${duration(VOICE_MAX_SECONDS)}`}>{duration(recordSeconds)} / {duration(VOICE_MAX_SECONDS)}</strong> · 시작한 시간과 그림 고정</> : '마이크 권한을 확인하고 있습니다…'}</span>{recording ? <button type="button" onClick={() => void toggleRecording()} aria-label="녹음 종료"><Square size={12}/>녹음 종료</button> : null}</div> : null}
@@ -212,6 +213,6 @@ export function Composer({ range, currentFrame, drawingContextFrame, drawings, b
       {editingMode && kind === 'request' ? <label className="composer-interpret"><input type="checkbox" checked={interpretNow} disabled={busy || saving || recording || requestingMicrophone || uploading} onChange={event => setInterpretNow(event.target.checked)}/>저장 후 바로 해석</label> : null}
     </div> : null}
     {sceneDescription.trim() && !hasContent && !pendingVoice && kind === 'request' ? <p className="composer-scene-only">피드백을 더 적거나, 메모를 선택해 장면 내용만 저장하세요.</p> : null}
-    <div className="composer-actions"><button type="button" className={`composer-options-toggle${optionsOpen ? ' active' : ''}`} aria-expanded={optionsOpen} aria-controls={optionsId} onClick={() => setOptionsOpen(value => !value)}>{optionsOpen ? <ChevronUp size={14}/> : <Plus size={14}/>}추가 옵션</button><span className="composer-save-shortcut" title="⌘ 또는 Ctrl + Enter로 저장">⌘ / Ctrl ↵</span><button type="submit" className="primary" disabled={!canSubmit || busy || saving || uploading || recording || requestingMicrophone || Boolean(pendingVoice)}>{busy || saving || uploading ? <LoaderCircle size={15} className="spinning"/> : <Send size={15}/>} {kind === 'note' ? '메모 저장' : editingMode && interpretNow ? '저장하고 해석' : '피드백 저장'}</button></div>
+    <div className="composer-actions"><button type="button" className={`composer-options-toggle${optionsOpen ? ' active' : ''}`} aria-expanded={optionsOpen} aria-controls={optionsId} onClick={() => setOptionsOpen(value => !value)}>{optionsOpen ? <ChevronUp size={14}/> : <Plus size={14}/>}추가 옵션</button><span className="composer-save-shortcut" title="Enter로 저장 · Shift + Enter로 줄바꿈 · Esc로 입력창 나가기"><kbd>Enter</kbd> 저장</span><button type="submit" className="primary" disabled={!canSubmit || busy || saving || uploading || recording || requestingMicrophone || Boolean(pendingVoice)}>{busy || saving || uploading ? <LoaderCircle size={15} className="spinning"/> : <Send size={15}/>} {kind === 'note' ? '메모 저장' : editingMode && interpretNow ? '저장하고 해석' : '피드백 저장'}</button></div>
   </form></div>;
 }

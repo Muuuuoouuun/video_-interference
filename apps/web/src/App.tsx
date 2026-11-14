@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FolderOpen, Play, ShieldCheck, Layers, Film, Download, Columns2, X, LoaderCircle, Info, Package, Square, Keyboard, Trash2, RotateCcw, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, SquarePen, CornerUpLeft, MoreHorizontal, Check, CircleCheck, CircleAlert, FileAudio } from 'lucide-react';
 import type { AppState, Attachment, BootstrapState, Comment, Drawing, EditOp, FeedbackExportResult, FeedbackCategory, InterpretResult, LayerChangeInput, LayerChangeResult, Project, RenderJob, RenderLayer, ReviewMarker, Version } from '../../../packages/core/types';
 import { confirmedMutation } from '../../../packages/core/confirmed-mutation.mjs';
+import { shortcutKey } from '../../../packages/core/shortcut-key.mjs';
 import { projectComment } from '../../../packages/core/comment-projection.mjs';
 import { createProjectedRequestDraft, planPlayerCompose } from '../../../packages/core/request-draft.mjs';
 import { drawingFrame, groupDrawings, projectDrawings } from '../../../packages/core/drawing-anchors.mjs';
@@ -115,8 +116,9 @@ export function App() {
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
-      if (event.defaultPrevented || event.isComposing || event.keyCode === 229 || event.repeat || target?.closest('input, textarea, select, [contenteditable], dialog, [role="dialog"]')) return;
-      if (event.key === '?' && !event.metaKey && !event.ctrlKey && !event.altKey || event.key === '/' && (event.metaKey || event.ctrlKey) && !event.altKey) {
+      if (event.defaultPrevented || event.repeat || target?.closest('input, textarea, select, [contenteditable], dialog, [role="dialog"]')) return;
+      const key = shortcutKey(event);
+      if (key === '?' && !event.metaKey && !event.ctrlKey && !event.altKey || key === '/' && (event.metaKey || event.ctrlKey) && !event.altKey) {
         event.preventDefault(); setShortcutsOpen(true);
       }
     };
