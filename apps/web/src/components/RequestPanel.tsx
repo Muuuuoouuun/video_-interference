@@ -46,6 +46,21 @@ interface CardShared {
   onTranscribe?: (id: string) => Promise<void>;
 }
 
+/**
+ * Bring a card or one of its fields into the list's view, at once.
+ * Cards outside the view are laid out lazily from an estimated height, and the browser applies their real
+ * heights a frame or two after a far jump. The target is therefore re-checked for a few frames and brought
+ * back whenever that late layout moved it.
+ */
+function settleIntoView(target: () => Element | null, frames = 8) {
+  const element = target();
+  if (!element) return;
+  const view = element.closest('.request-list')?.getBoundingClientRect(), box = element.getBoundingClientRect();
+  const landed = view ? box.height <= view.height ? box.top >= view.top - 1 && box.bottom <= view.bottom + 1 : box.bottom > view.top + 1 && box.top < view.bottom - 1 : false;
+  if (!landed) element.scrollIntoView({ block: 'nearest', behavior: 'instant' });
+  if (frames > 1) requestAnimationFrame(() => settleIntoView(target, frames - 1));
+}
+
 function rangeLabel(frameIn: number, frameOut: number) { return frameOut - frameIn === 1 ? time(frameIn) : `${time(frameIn)} – ${time(frameOut)}`; }
 
 function supplementTime(value: string) {
@@ -103,7 +118,7 @@ export const RequestPanel = memo(function RequestPanel({ headerActions, keyboard
     const raf = requestAnimationFrame(() => {
       const textarea = document.getElementById(`supplement-${resumeSupplementId}`);
       if (!textarea) return;
-      textarea.scrollIntoView({ block: 'nearest' });
+      settleIntoView(() => document.getElementById(`supplement-${resumeSupplementId}`));
       textarea.focus({ preventScroll: true });
       setResumeSupplementId(null);
     });
@@ -114,8 +129,8 @@ export const RequestPanel = memo(function RequestPanel({ headerActions, keyboard
     const raf = requestAnimationFrame(() => {
       const textarea = document.getElementById(`comment-text-${resumeCommentId}`);
       // Show the whole editor with its save row; the focused field wins when the list is shorter than the editor.
-      textarea?.closest('.rq-comment-editor')?.scrollIntoView({ block: 'nearest', behavior: 'instant' });
-      textarea?.scrollIntoView({ block: 'nearest', behavior: 'instant' });
+      settleIntoView(() => document.getElementById(`comment-text-${resumeCommentId}`)?.closest('.rq-comment-editor') ?? null);
+      settleIntoView(() => document.getElementById(`comment-text-${resumeCommentId}`));
       textarea?.focus({ preventScroll: true });
       setResumeCommentId(null);
     });
@@ -168,7 +183,7 @@ export const RequestPanel = memo(function RequestPanel({ headerActions, keyboard
     const raf = requestAnimationFrame(() => {
       const card = document.getElementById(`request-${pendingRevealId}`);
       if (!card) return;
-      card.scrollIntoView({ block: 'nearest' });
+      settleIntoView(() => document.getElementById(`request-${pendingRevealId}`));
       setPendingRevealId(null);
     });
     return () => cancelAnimationFrame(raf);
@@ -184,8 +199,7 @@ export const RequestPanel = memo(function RequestPanel({ headerActions, keyboard
     selectFromList(comment);
     requestAnimationFrame(() => {
       const card = document.getElementById(`request-${comment.id}`);
-      // Stepping must land at once; the list's smooth scrolling is for pointer use.
-      card?.scrollIntoView({ block: 'nearest', behavior: 'instant' });
+      settleIntoView(() => document.getElementById(`request-${comment.id}`));
       // Stepping from the player keeps focus there, so Space still plays and C still writes.
       if (focusCard) card?.querySelector<HTMLButtonElement>('.request-location')?.focus({ preventScroll: true });
     });
