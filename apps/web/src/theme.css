@@ -669,3 +669,111 @@ dialog[open]::backdrop { animation: vi-fade-in var(--motion-base) var(--ease-out
 .rq-editor-footer { justify-content: flex-end; flex-wrap: nowrap; gap: 6px; margin-top: 10px; }
 .rq-editor-footer button, .rq-supplement-form-actions button { display: inline-flex; align-items: center; gap: 6px; min-height: 30px; padding: 0 10px; font-size: 12px; }
 .rq-editor-footer kbd, .rq-supplement-form-actions kbd { padding: 0 4px; border: 1px solid currentColor; border-radius: 4px; background: transparent; color: inherit; font: inherit; font-size: 11px; line-height: 1.45; opacity: .65; }
+
+/* Compact rail · 2026-11-16
+   Two toolbar rows instead of four, icon filters and tools, flat list rows, and a three-row composer. */
+/* Row 1: title, position, compose and collapse. */
+.request-panel .rq-panel-heading { gap: 6px; margin-bottom: 8px; min-height: 30px; }
+.request-panel .rq-heading-title { flex: 1 1 auto; }
+.request-panel .rq-heading-title > h1 { font-size: 15px; letter-spacing: -.01em; }
+.request-panel .rq-navigation { gap: 2px; }
+.request-panel .rq-navigation > span { margin-right: 4px; font-size: 12px; font-family: var(--time-font); color: var(--muted); }
+.request-panel .rq-navigation button, .request-panel .rq-tool-button { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: 1px solid transparent; border-radius: 6px; color: var(--text-secondary); background: transparent; }
+.request-panel .rq-navigation button:hover:not(:disabled), .request-panel .rq-tool-button:hover:not(:disabled) { color: var(--text); border-color: transparent; background: var(--surface-muted); }
+.request-panel .rq-navigation button:disabled { opacity: .3; }
+.request-panel .rq-tool-button[data-active="true"] { color: var(--accent); background: var(--accent-soft); }
+.request-panel .rq-navigation button:focus-visible, .request-panel .rq-tool-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.request-panel .rq-header-actions { gap: 2px; padding-left: 6px; margin-left: 2px; border-left: 1px solid var(--border); }
+.feedback-compose-action { width: 28px; min-height: 28px; height: 28px; padding: 0; border-color: transparent; border-radius: 6px; background: transparent; }
+.feedback-compose-action > span, .feedback-compose-action > kbd { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.feedback-compose-action:hover:not(:disabled) { color: var(--accent); border-color: transparent; background: var(--accent-soft); }
+/* Returning to an unsaved draft is a state, so that one case keeps its words. */
+.feedback-compose-action[data-returning="true"] { width: auto; padding: 0 8px; gap: 5px; border-color: var(--accent-border); background: var(--accent-soft); }
+.feedback-compose-action[data-returning="true"] > span { position: static; width: auto; height: auto; overflow: visible; clip: auto; font-size: 12px; font-weight: 600; }
+.feedback-panel-toggle { width: 28px; height: 28px; border-radius: 6px; }
+/* Row 2: filters on the left, search and sort on the right. */
+.request-panel .rq-toolbar-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; min-width: 0; }
+.request-panel .rq-toolbar-row .rq-filter-group { display: inline-flex; grid-template-columns: none; flex: 0 1 auto; gap: 2px; margin: 0; padding: 2px; min-width: 0; }
+.request-panel .rq-toolbar-row .rq-filter-button { flex: 0 0 auto; min-height: 24px; padding: 0 7px; gap: 5px; border-radius: 4px; }
+.request-panel .rq-toolbar-row .rq-filter-button:not(.active) .rq-filter-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.request-panel .rq-toolbar-row .rq-filter-count { min-width: 0; padding: 0; background: transparent; font-size: 11px; font-family: var(--time-font); }
+.request-panel .rq-toolbar-row .rq-filter-button[aria-pressed="true"] .rq-filter-count { background: transparent; }
+.request-panel .rq-tools { display: inline-flex; align-items: center; gap: 2px; flex: 0 0 auto; }
+.request-panel .rq-list-toolbar > .rq-search { height: 30px; margin-bottom: 8px; animation: vi-pop-in var(--motion-fast, 120ms) var(--ease-out, ease-out); }
+.request-panel .rq-list-toolbar > .rq-search button { display: inline-flex; }
+.request-panel .rq-results-summary { margin: 0 0 6px; font-size: 11px; }
+.request-panel .rq-results-summary button { font-size: 11px; }
+/* List: rows divided by a hairline instead of boxed cards. */
+.request-rail .request-list { gap: 0; border-top: 1px solid var(--border); }
+.request-panel .request-list > .request-item { padding: 10px 8px 10px 10px; border: 0; border-bottom: 1px solid var(--border); border-radius: 0; background: transparent; box-shadow: none; }
+.request-panel .request-list > .request-item:hover:not(.selected) { border-color: var(--border); background: var(--surface-soft); box-shadow: none; }
+.request-panel .request-list > .request-item.selected { border-color: var(--border); background: var(--accent-soft); box-shadow: inset 2px 0 0 var(--accent); }
+.request-panel .request-list > .request-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.request-panel .request-item .rq-time-range { font-size: 12px; font-weight: 600; letter-spacing: -.01em; }
+/* Composer: time, range and category on one row; the save button carries its key. */
+.request-rail .composer-wrap { padding-top: 8px; }
+.composer { padding: 8px; border-radius: 8px; }
+.composer .composer-context { flex-wrap: wrap; gap: 4px; margin-bottom: 6px; }
+.composer .composer-time-chip { height: 24px; padding: 0 7px; gap: 5px; color: var(--text-secondary); background: var(--surface-muted); border-color: transparent; }
+.composer .composer-time-chip > strong { color: var(--text); }
+.composer .composer-time-chip .composer-anchor-label:not([data-voice="true"]) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.composer .composer-range-chip { height: 24px; padding: 0 3px 0 7px; }
+.composer .composer-select-range { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; margin-left: 0; padding: 0; border-radius: 4px; color: var(--text-secondary); text-decoration: none; }
+.composer .composer-select-range:hover:not(:disabled) { color: var(--accent); background: var(--accent-soft); }
+.composer .composer-context > .feedback-category-chips { flex-wrap: nowrap; gap: 2px; margin-left: auto; }
+.feedback-category-chip { gap: 4px; height: 24px; padding: 0 6px; border-color: transparent; background: transparent; color: var(--muted); }
+.feedback-category-chip:hover:not(:disabled) { border-color: transparent; background: var(--surface-muted); color: var(--pin-ink); }
+.feedback-category-chip[aria-checked="true"] { padding: 0 8px; border-color: rgb(var(--pin-rgb) / 35%); }
+.feedback-category-chip:not([aria-checked="true"]) .feedback-category-chip-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.composer .composer-actions { margin-top: 6px; gap: 6px; }
+.composer .composer-options-toggle { height: 28px; padding: 0 8px 0 6px; gap: 4px; border-radius: 6px; color: var(--text-secondary); font-size: 12px; }
+.composer .composer-options-toggle:hover, .composer .composer-options-toggle.active { color: var(--text); background: var(--surface-muted); }
+.composer .composer-actions > button[type="submit"] { margin-left: auto; min-height: 30px; padding: 0 10px; gap: 6px; }
+.composer .composer-actions > button[type="submit"] kbd { padding: 0 4px; border: 1px solid currentColor; border-radius: 4px; background: transparent; color: inherit; font: inherit; font-size: 11px; line-height: 1.45; opacity: .7; }
+
+/* Compact player · 2026-11-16
+   No separate title row: the version sits in the breadcrumb and the media size in the status bar.
+   Player tools are icons with tooltips; words stay only where they name the primary action. */
+.breadcrumb .breadcrumb-version { padding: 2px 7px; border-radius: 4px; color: var(--text-secondary); background: var(--surface-muted); font-size: 12px; font-weight: 600; white-space: nowrap; }
+.workspace-heading.workspace-heading-actions { justify-content: flex-end; min-height: 0; margin: -4px 0 6px; padding: 0; }
+.vi-review-toolbar .vi-tool-label, .vi-review-toolbar .oe-tools-toggle > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.vi-review-toolbar .vi-loop-button { justify-content: center; min-width: 28px; padding: 0 6px; gap: 4px; }
+.vi-review-toolbar .vi-loop-button.active, .vi-review-toolbar .vi-loop-button[aria-pressed="true"] { color: var(--accent); border-color: var(--accent-border); background: var(--accent-soft); }
+.vi-review-toolbar .oe-tools-toggle { padding: 0 6px; gap: 3px; }
+.vi-review-toolbar .vi-playback-speed select { font-family: var(--time-font); }
+/* With icon tools there is room for the total length next to the current time. */
+@container (min-width: 720px) { .vi-review-toolbar .vi-timecode > span { display: inline; } }
+.vi-review-toolbar .vi-timecode > span { font-family: var(--time-font); font-size: 12px; }
+/* Flatter timeline pins and quieter key hints: colour carries the category, not shadow or boxes. */
+.vi-marker-rail .vi-comment-marker { border-width: 1px; border-radius: 6px; box-shadow: none; }
+.vi-marker-rail .vi-comment-marker[data-mixed="true"] { box-shadow: 2px -2px 0 -1px var(--surface), 3px -3px 0 -1px var(--pin-color); }
+.vi-marker-rail .vi-comment-marker:hover:not(:disabled) { box-shadow: none; }
+.vi-marker-rail .vi-comment-marker.vi-comment-selected, .vi-marker-rail .vi-comment-marker[aria-expanded="true"] { box-shadow: 0 0 0 2px rgb(var(--pin-rgb) / 22%); }
+.status-bar .status-shortcuts kbd { border-color: transparent; background: var(--surface-muted); color: var(--text-secondary); }
+.status-bar .status-media { font-family: var(--time-font); }
+/* Rail fixes: counts in the UI face, hairlines only as wide as the rows. */
+.request-panel .rq-toolbar-row .rq-filter-count { font-family: inherit; font-variant-numeric: tabular-nums; }
+.request-rail .request-list { border-top: 0; }
+.request-panel .request-list > .request-item:first-child { border-top: 1px solid var(--border); }
+.request-panel .rq-header-actions { border-left: 0; padding-left: 0; margin-left: 4px; }
+.status-bar .status-media { font-family: inherit; font-variant-numeric: tabular-nums; }
+.vi-review-toolbar .vi-timecode > span { margin-left: 4px; }
+/* The player and the composer already show the current time, so the point row keeps only its two actions. */
+.vi-point-fields .vi-point-time { display: none; }
+.vi-point-fields > div:first-child:empty { display: none; }
+.vi-point-fields .vi-selection-actions { flex: 1 1 auto; justify-content: space-between; margin-left: 0; }
+/* Side icons and the detail toggle lose their boxes; a border appears only on hover or focus. */
+.version-rail .rail-collapse-toggle, .collapsed-project-tools button { border-color: transparent; background: transparent; }
+.version-rail .rail-collapse-toggle:hover, .collapsed-project-tools button:hover { border-color: transparent; color: var(--text); background: var(--surface-muted); }
+.collapsed-project-tools { gap: 6px; }
+.vi-workspace:not([data-timeline-simple="true"], [data-timeline-compact="true"]) .vi-details:not(:has(.vi-details-toggle[aria-expanded="true"])) { border-color: transparent; background: transparent; }
+.vi-details .vi-details-toggle { padding-left: 2px; padding-right: 2px; }
+.vi-details .vi-details-toggle[aria-expanded="true"] { padding-left: 10px; padding-right: 10px; }
+.vi-details .vi-details-toggle:hover { background: var(--surface-muted); }
+.vi-point-fields > div:first-child:not(:has(small)) { display: none; }
+/* Crash screen: one calm card, same surface language as the start screen. */
+.app-crash { min-height: 100dvh; display: grid; place-items: center; padding: 24px; background: var(--canvas); color: var(--text); }
+.app-crash > section { width: min(460px, 100%); padding: 24px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--surface); }
+.app-crash h1 { margin: 0 0 8px; font-size: 17px; }
+.app-crash p { margin: 0 0 14px; color: var(--text-secondary); font-size: 13px; line-height: 1.6; }
+.app-crash pre { max-height: 96px; margin: 0 0 14px; padding: 8px 10px; overflow: auto; border-radius: 6px; background: var(--surface-muted); color: var(--muted); font-size: 11px; white-space: pre-wrap; word-break: break-word; }

@@ -55,3 +55,9 @@ test('the feedback rail keeps one right edge: list and composer share an 8px scr
   assert.match(lane, /margin-right:\s*-8px/);
   assert.match(theme, /\.request-rail \.request-list::-webkit-scrollbar, \.request-rail \.composer-wrap::-webkit-scrollbar \{ width: 8px; \}/);
 });
+
+test('the list toolbar stays on one row and lists are divided rows, not boxed cards', () => {
+  assert.match(rule('.request-panel .rq-toolbar-row'), /display:\s*flex;[^}]*justify-content:\s*space-between/);
+  assert.match(rule('.request-panel .request-list > .request-item'), /border:\s*0;[^}]*border-bottom:\s*1px solid/);
+  assert.match(theme, /\.rq-filter-button:not\(\.active\) \.rq-filter-label \{ position: absolute; width: 1px; height: 1px;/, 'hidden labels stay in the DOM as accessible names');
+});

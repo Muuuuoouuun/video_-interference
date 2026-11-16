@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from 'react';
-import { Check, Clock3, Brackets, FileText, MessageSquare, SlidersHorizontal, Type, Volume2, X, Image, Scissors, RotateCcw, PencilLine, LoaderCircle, Trash2, Plus, ChevronUp, ChevronDown, Search, LayoutList, StickyNote, ArrowDownWideNarrow } from 'lucide-react';
+import { Check, Clock3, Brackets, FileText, MessageSquare, SlidersHorizontal, Type, Volume2, X, Image, Scissors, RotateCcw, PencilLine, LoaderCircle, Trash2, Plus, ChevronUp, ChevronDown, Search, LayoutList, StickyNote, ArrowDownWideNarrow, History } from 'lucide-react';
 import type { Attachment, Comment, EditOp, Region, Version, FeedbackCategory } from '../../../../packages/core/types';
 import { projectComment } from '../../../../packages/core/comment-projection.mjs';
 import { selectFeedbackList } from '../../../../packages/core/feedback-list.mjs';
@@ -9,6 +9,7 @@ import { time, duration } from '../format';
 import { AttachmentGallery } from './AttachmentGallery';
 import { SubmitTextarea } from './SubmitTextarea';
 import { useShallowStable, useStableHandlers } from './useStable';
+import { shortcutKey } from '../../../../packages/core/shortcut-key.mjs';
 import { feedbackCategory, FEEDBACK_CATEGORY_LABELS } from '../../../../packages/core/feedback-category.mjs';
 import { FeedbackCategorySelect } from './FeedbackCategory';
 import './RequestPanel.css';
@@ -74,6 +75,12 @@ export const RequestPanel = memo(function RequestPanel({ headerActions, keyboard
   const localSelection = useRef<string|null>(null);
   const lastSelectedId = useRef(selectedId);
   const [searchQuery, setSearchQuery] = useState('');
+  // The search field takes a row only while it is in use; the toolbar otherwise stays on one line.
+  const [searchOpen, setSearchOpen] = useState(false);
+  const searchToggleRef = useRef<HTMLButtonElement>(null);
+  const searchVisible = searchOpen || Boolean(searchQuery);
+  function openSearch() { setSearchOpen(true); requestAnimationFrame(() => searchRef.current?.focus()); }
+  function closeSearch(returnFocus = false) { setSearchOpen(false); setSearchQuery(''); if (returnFocus) searchToggleRef.current?.focus(); }
   const [sort, setSort] = useState<FeedbackSort>('timeline');
   const [pendingRevealId, setPendingRevealId] = useState<string|null>(null);
   const [focusAfterAction, setFocusAfterAction] = useState<string[] | null>(null);
@@ -195,7 +202,7 @@ export const RequestPanel = memo(function RequestPanel({ headerActions, keyboard
   const previousComment = selectedVisibleIndex > 0 ? visible[selectedVisibleIndex - 1] : undefined;
   const nextComment = visible[selectedVisibleIndex + 1];
   function selectFromList(comment: Comment) { localSelection.current = comment.id; onSelect(comment); }
-  function resetListFilters() { setSearchQuery(''); setFilter('all'); searchRef.current?.focus(); }
+  function resetListFilters() { setSearchQuery(''); setSearchOpen(false); setFilter('all'); searchToggleRef.current?.focus(); }
   function moveToComment(comment: Comment | undefined, focusCard = true) {
     if (!comment || navigationBusy || commentInFlight.current || supplementInFlight.current) return;
     selectFromList(comment);
@@ -275,6 +282,7 @@ export const RequestPanel = memo(function RequestPanel({ headerActions, keyboard
         return;
       }
       if (event.altKey || event.repeat) return;
+      if (!event.shiftKey && shortcutKey(event) === '/') { event.preventDefault(); openSearch(); return; }
       const focusedCard = target?.closest('article[data-feedback-id]');
       const focusedId = focusedCard && panelRef.current?.contains(focusedCard) ? focusedCard.getAttribute('data-feedback-id') : null;
       const comment = visible.find(item => item.id === (focusedId ?? selectedId));
@@ -336,16 +344,21 @@ export const RequestPanel = memo(function RequestPanel({ headerActions, keyboard
   });
   return <section ref={panelRef} className="request-panel" aria-label="시간별 피드백 목록">
     <div className="rq-list-toolbar">
-    <div className="panel-heading rq-panel-heading"><div className="rq-heading-title"><h1>{editingMode ? '편집 요청' : '댓글'}</h1><span className="subtle">{comments.length}</span></div>{headerActions ? <div className="rq-header-actions">{headerActions}</div> : null}</div>
+    <div className="panel-heading rq-panel-heading"><div className="rq-heading-title"><h1>{editingMode ? '편집 요청' : '댓글'}</h1></div>
+      <nav className="rq-navigation" aria-label="피드백 이동"><span title="선택한 피드백 / 표시 중인 피드백">{selectedVisibleIndex < 0 ? '–' : selectedVisibleIndex + 1}<small> / {visible.length}</small></span><button type="button" disabled={navigationBusy || !previousComment} onClick={() => moveToComment(previousComment)} aria-label="이전 피드백" aria-keyshortcuts="ArrowUp" title="이전 피드백 ( ↑ )"><ChevronUp size={16}/></button><button type="button" disabled={navigationBusy || !nextComment} onClick={() => moveToComment(nextComment)} aria-label="다음 피드백" aria-keyshortcuts="ArrowDown" title="다음 피드백 ( ↓ )"><ChevronDown size={16}/></button></nav>
+      {headerActions ? <div className="rq-header-actions">{headerActions}</div> : null}</div>
     {pendingCommentEdits.length > 0 ? <button className="rq-draft-summary" disabled={busy || savingCommentId !== null || deletingCommentId !== null} onClick={() => startCommentEdit(pendingCommentEdits[0])}><PencilLine size={13}/><span>수정 중인 피드백 {pendingCommentEdits.length}개 · 이어쓰기</span></button> : null}
     {pendingSupplements.length > 0 ? <button className="rq-draft-summary" disabled={busy || savingSupplementId !== null} onClick={() => { const first = pendingSupplements[0]; setFilter('all'); setSearchQuery(''); setSupplementing(first.id); setFailedSupplementId(null); setResumeSupplementId(first.id); }}><PencilLine size={13}/><span>작성 중인 보완 {pendingSupplements.length}개 · 이어쓰기</span></button> : null}
-    <div className="request-tabs rq-filter-group" role="group" aria-label={editingMode ? '요청 상태 필터' : '댓글 종류 필터'} data-advanced={editingMode}>
-      {filters.map(([key,label]) => { const Icon = filterIcons[key]; return <button type="button" key={key} aria-pressed={filter === key} aria-label={`${label} ${filterCounts[key]}개`} className={`rq-filter-button${filter === key ? ' active' : ''}`} onClick={() => setFilter(key)}><Icon size={14} aria-hidden="true"/><span className="rq-filter-label">{label}</span><span className="rq-filter-count" aria-hidden="true">{filterCounts[key]}</span></button>; })}
+    <div className="rq-toolbar-row">
+      <div className="request-tabs rq-filter-group" role="group" aria-label={editingMode ? '요청 상태 필터' : '댓글 종류 필터'} data-advanced={editingMode}>
+        {filters.map(([key,label]) => { const Icon = filterIcons[key]; return <button type="button" key={key} aria-pressed={filter === key} aria-label={`${label} ${filterCounts[key]}개`} title={`${label} ${filterCounts[key]}개`} className={`rq-filter-button${filter === key ? ' active' : ''}`} onClick={() => setFilter(key)}><Icon size={14} aria-hidden="true"/><span className="rq-filter-label">{label}</span><span className="rq-filter-count" aria-hidden="true">{filterCounts[key]}</span></button>; })}
+      </div>
+      <div className="rq-tools">
+        <button type="button" ref={searchToggleRef} className="rq-tool-button" aria-label="피드백 검색" aria-expanded={searchVisible} aria-keyshortcuts="/" data-active={searchVisible} title="검색 ( / )" onClick={() => searchVisible ? closeSearch() : openSearch()}><Search size={15} aria-hidden="true"/></button>
+        <button type="button" className="rq-tool-button" aria-label={`정렬: ${sort === 'timeline' ? '영상 시간순' : '최근 작성순'}`} data-active={sort === 'newest'} title={sort === 'timeline' ? `영상 시간순 (현재 v${currentVersion.number} 기준) · 누르면 최근 작성순` : '최근 작성순 · 누르면 영상 시간순'} onClick={() => setSort(sort === 'timeline' ? 'newest' : 'timeline')}>{sort === 'timeline' ? <ArrowDownWideNarrow size={15} aria-hidden="true"/> : <History size={15} aria-hidden="true"/>}</button>
+      </div>
     </div>
-    <div className="rq-list-controls">
-      <div className="rq-search" role="search"><Search size={15} aria-hidden="true"/><input ref={searchRef} type="search" aria-label="피드백 검색" placeholder="댓글·장면·첨부 검색" value={searchQuery} onChange={event => setSearchQuery(event.target.value)} onKeyDown={event => { if (event.key === 'Escape' && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) { event.preventDefault(); event.stopPropagation(); setSearchQuery(''); } }}/>{searchQuery ? <button type="button" aria-label="검색어 지우기" title="검색어 지우기" onClick={() => { setSearchQuery(''); searchRef.current?.focus(); }}><X size={14}/></button> : null}</div>
-      <div className="rq-list-meta"><label className="rq-sort"><span className="rq-sort-label">정렬</span><ArrowDownWideNarrow className="rq-sort-icon" size={14} aria-hidden="true"/><select aria-label="피드백 정렬" value={sort} onChange={event => setSort(event.target.value as FeedbackSort)} title={`영상 시간순은 현재 v${currentVersion.number} 기준입니다.`}><option value="timeline">영상 시간순</option><option value="newest">최근 작성순</option></select><ChevronDown className="rq-sort-chevron" size={13} aria-hidden="true"/></label><nav className="rq-navigation" aria-label="피드백 이동"><span>{selectedVisibleIndex < 0 ? '–' : selectedVisibleIndex + 1}<small> / {visible.length}</small></span><button type="button" disabled={navigationBusy || !previousComment} onClick={() => moveToComment(previousComment)} aria-label="이전 피드백" aria-keyshortcuts="Alt+ArrowUp" title="이전 피드백 · 목록에서 Alt + ↑"><ChevronUp size={16}/></button><button type="button" disabled={navigationBusy || !nextComment} onClick={() => moveToComment(nextComment)} aria-label="다음 피드백" aria-keyshortcuts="Alt+ArrowDown" title="다음 피드백 · 목록에서 Alt + ↓"><ChevronDown size={16}/></button></nav></div>
-    </div>
+    {searchVisible ? <div className="rq-search" role="search"><Search size={15} aria-hidden="true"/><input ref={searchRef} type="search" aria-label="피드백 검색어" placeholder="댓글·장면·첨부 검색" value={searchQuery} onChange={event => setSearchQuery(event.target.value)} onKeyDown={event => { if (event.key === 'Escape' && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) { event.preventDefault(); event.stopPropagation(); if (searchQuery) setSearchQuery(''); else closeSearch(true); } }}/><button type="button" aria-label="검색 닫기" title="검색 닫기 (Esc)" onClick={() => closeSearch(true)}><X size={14}/></button></div> : null}
     {searchQuery.trim() || filter !== 'all' ? <div className="rq-results-summary" role="status"><span>{visible.length}개 표시 · 전체 {comments.length}개</span><button type="button" onClick={resetListFilters}>전체 보기</button></div> : null}
     </div>
     <div className="request-list">

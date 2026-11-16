@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { AudioLines, Clapperboard, Clock3, FileText, Film, FolderOpen, Image as ImageIcon, LoaderCircle, ShieldCheck, Sparkles } from 'lucide-react';
+import { AudioLines, ChevronDown, Clapperboard, Clock3, FileText, Film, FolderOpen, Image as ImageIcon, LoaderCircle, ShieldCheck } from 'lucide-react';
 import { HeaderMenu } from '../ui/HeaderMenu';
 import { ImportProgress, type ImportProgressState } from './ImportProgress';
 import './VideoStart.css';
@@ -46,7 +46,7 @@ export function VideoStart({ busy, error, progress = null, onCancel, onImport, o
   return <div className="video-start">
     <header className="video-start-header"><span className="wordmark">INTERFERENCE</span>
       <div className="video-start-header-actions">
-        {onGenerate || onGenerateAudio || onGenerateVideo ? <HeaderMenu label="AI 생성" ariaLabel="AI 생성 메뉴" icon={<Sparkles size={16}/>}>
+        {onGenerate || onGenerateAudio || onGenerateVideo ? <HeaderMenu label="AI 생성" ariaLabel="AI 생성 메뉴" trailing={<ChevronDown size={14}/>}>
           {onGenerate ? <button className="quiet" onClick={onGenerate}><ImageIcon size={15}/>이미지 생성</button> : null}
           {onGenerateAudio ? <button className="quiet" onClick={onGenerateAudio}><AudioLines size={15}/>음성 생성</button> : null}
           {onGenerateVideo ? <button className="quiet" onClick={onGenerateVideo}><Clapperboard size={15}/>영상 생성</button> : null}
