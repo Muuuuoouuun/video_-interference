@@ -24,3 +24,34 @@ test('offscreen cards skip rendering with a remembered size, and the composer gr
   assert.match(cards, /contain-intrinsic-size:\s*auto\s+\d+px/);
   assert.match(rule('.composer .composer-feedback-field > textarea'), /min-height:\s*36px;[^}]*resize:\s*none/);
 });
+
+// Design scale guard: every stylesheet, so a new component cannot quietly reintroduce the old values.
+const { readdir } = await import('node:fs/promises');
+const styles = [];
+for (const directory of ['../apps/web/src/', '../apps/web/src/components/', '../apps/web/src/ui/']) {
+  let names = [];
+  try { names = await readdir(new URL(directory, import.meta.url)); } catch { /* optional directory */ }
+  for (const name of names.filter(file => file.endsWith('.css'))) styles.push([`${directory}${name}`, await readFile(new URL(`${directory}${name}`, import.meta.url), 'utf8')]);
+}
+
+test('no stylesheet sets text below 11px', () => {
+  assert.ok(styles.length >= 20, 'the stylesheets were found');
+  for (const [file, css] of styles) {
+    const small = [...css.matchAll(/font-size:\s*([\d.]+)px/g)].map(match => Number(match[1])).filter(size => size < 11);
+    assert.deepEqual(small, [], `${file} has text under 11px`);
+  }
+});
+
+test('corner radii stay on the 2 · 4 · 6 · 8 scale', () => {
+  for (const [file, css] of styles) {
+    const off = [...css.matchAll(/border-radius:\s*([357])px\s*[;}]/g)].map(match => `${match[1]}px`);
+    assert.deepEqual(off, [], `${file} uses a radius that was merged into the scale`);
+  }
+});
+
+test('the feedback rail keeps one right edge: list and composer share an 8px scrollbar lane', () => {
+  const lane = rule('.request-rail .request-list, .request-rail .composer-wrap');
+  assert.match(lane, /scrollbar-gutter:\s*stable/);
+  assert.match(lane, /margin-right:\s*-8px/);
+  assert.match(theme, /\.request-rail \.request-list::-webkit-scrollbar, \.request-rail \.composer-wrap::-webkit-scrollbar \{ width: 8px; \}/);
+});

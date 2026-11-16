@@ -663,3 +663,9 @@ dialog[open]::backdrop { animation: vi-fade-in var(--motion-base) var(--ease-out
 /* Start screen header: wordmark left, one action group right. */
 .video-start-header-actions { display: flex; align-items: center; gap: 14px; }
 .video-start-header .video-start-private { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; white-space: nowrap; }
+/* Opened detail tracks scroll to just under the dock's sticky player row. */
+.vi-details { scroll-margin-top: 35px; }
+/* Card editor and follow-up actions: one right-aligned row, each button carrying its own key. */
+.rq-editor-footer { justify-content: flex-end; flex-wrap: nowrap; gap: 6px; margin-top: 10px; }
+.rq-editor-footer button, .rq-supplement-form-actions button { display: inline-flex; align-items: center; gap: 6px; min-height: 30px; padding: 0 10px; font-size: 12px; }
+.rq-editor-footer kbd, .rq-supplement-form-actions kbd { padding: 0 4px; border: 1px solid currentColor; border-radius: 4px; background: transparent; color: inherit; font: inherit; font-size: 11px; line-height: 1.45; opacity: .65; }

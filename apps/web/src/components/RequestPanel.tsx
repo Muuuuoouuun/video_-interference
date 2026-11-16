@@ -132,6 +132,8 @@ export const RequestPanel = memo(function RequestPanel({ headerActions, keyboard
       settleIntoView(() => document.getElementById(`comment-text-${resumeCommentId}`)?.closest('.rq-comment-editor') ?? null);
       settleIntoView(() => document.getElementById(`comment-text-${resumeCommentId}`));
       textarea?.focus({ preventScroll: true });
+      // Editing usually continues the sentence, so the caret starts at the end instead of the first character.
+      if (textarea instanceof HTMLTextAreaElement) textarea.setSelectionRange(textarea.value.length, textarea.value.length);
       setResumeCommentId(null);
     });
     return () => cancelAnimationFrame(raf);
@@ -418,7 +420,7 @@ const FeedbackCard = memo(function FeedbackCard({ comment, selected, shared }: {
         <SubmitTextarea rows={2} maxHeight={220} onSubmit={() => { if (canSaveEdit) void saveCommentEdit(comment); }} aria-keyshortcuts="Enter" id={`comment-text-${comment.id}`} value={commentDraft.text} maxLength={5000} disabled={supplementBusy} placeholder="어떤 부분을 어떻게 바꿀까요?" onChange={event => { const text = event.target.value; setCommentDrafts(drafts => ({ ...drafts, [comment.id]: { ...drafts[comment.id], text } })); setFailedCommentId(null); }}/>
         {related.length > 0 && (commentDraft.text !== commentDraft.originalText || commentDraft.sceneDescription !== commentDraft.originalSceneDescription) ? <p className="rq-supplement-approval">수정하면 기존 해석과 승인을 해제합니다.</p> : null}
         {failedCommentId === comment.id ? <p className="rq-supplement-error" role="alert">저장하지 못했습니다. 수정한 내용은 유지됩니다.</p> : null}
-        <div className="rq-editor-footer"><span title="Enter로 저장 · Shift + Enter로 줄바꿈 · Esc로 취소"><kbd>Enter</kbd> 저장 · <kbd>Esc</kbd> 취소</span><div><button type="button" className="quiet" disabled={supplementBusy} onClick={() => cancelCommentEdit(comment.id)}>취소</button><button type="submit" className="outline-mint" disabled={supplementBusy || !canSaveEdit}>{savingCommentId === comment.id ? <LoaderCircle size={13} className="spinning"/> : <Check size={13}/>}수정 저장</button></div></div>
+        <div className="rq-editor-footer"><button type="button" className="quiet" disabled={supplementBusy} onClick={() => cancelCommentEdit(comment.id)} title="취소 (Esc)">취소<kbd aria-hidden="true">Esc</kbd></button><button type="submit" className="outline-mint" disabled={supplementBusy || !canSaveEdit} title="저장 (Enter) · Shift + Enter로 줄바꿈">{savingCommentId === comment.id ? <LoaderCircle size={13} className="spinning"/> : <Check size={13}/>}수정 저장<kbd aria-hidden="true">Enter</kbd></button></div>
       </form>}
       {supplements.length > 0 ? <ol className="rq-supplement-history" aria-label={isNote ? '메모 보완 기록' : '추가 지시 기록'}>{supplements.map((supplement, supplementIndex) => <li key={supplement.id}><div><span>{isNote ? '메모 보완' : '추가 지시'} {supplementIndex + 1}</span><time dateTime={supplement.createdAt}>{supplementTime(supplement.createdAt)}</time></div><p>{supplement.text}</p></li>)}</ol> : null}
       <AttachmentGallery compact disabled={busy} onTranscribe={onTranscribe} transcribingId={transcribingId} attachments={attachmentsByComment.get(comment.id)!}/>
@@ -460,7 +462,7 @@ const FeedbackCard = memo(function FeedbackCard({ comment, selected, shared }: {
         {hasApproved ? <p className="rq-supplement-approval">추가 지시를 저장하면 이전 승인이 해제됩니다.</p> : null}
         {!hasApplied ? <p className="rq-supplement-help">{isNote ? '원문을 유지하고 보완 기록으로 저장합니다.' : editingMode ? '원문을 유지합니다. 저장 후 요청 해석을 눌러 주세요.' : '원문과 보완 내용을 함께 전달 자료에 담습니다.'}</p> : null}
         {failedSupplementId === comment.id ? <p className="rq-supplement-error" role="alert">보완 내용을 저장하지 못했습니다. 내용을 유지했으니 다시 시도해 주세요.</p> : null}
-        <div className="rq-supplement-form-actions"><button type="button" className="quiet" disabled={supplementBusy} onClick={() => cancelSupplement(comment.id)}>취소</button><button type="submit" className="outline-mint" disabled={supplementBusy || hasApplied || !supplementDrafts[comment.id]?.trim()}>{savingSupplementId === comment.id ? <LoaderCircle size={13} className="spinning"/> : null}추가 저장</button></div>
+        <div className="rq-supplement-form-actions"><button type="button" className="quiet" disabled={supplementBusy} onClick={() => cancelSupplement(comment.id)} title="취소 (Esc)">취소<kbd aria-hidden="true">Esc</kbd></button><button type="submit" className="outline-mint" disabled={supplementBusy || hasApplied || !supplementDrafts[comment.id]?.trim()} title="저장 (Enter) · Shift + Enter로 줄바꿈">{savingSupplementId === comment.id ? <LoaderCircle size={13} className="spinning"/> : null}추가 저장<kbd aria-hidden="true">Enter</kbd></button></div>
       </form> : null}
     </article>;
 });

@@ -31,7 +31,14 @@ const detailTime = (item: TimelineDetailItem) => item.frameOut - item.frameIn > 
 export const TimelineDetails = memo(function TimelineDetails(props: Props) {
   const [expanded, setExpanded] = useState(false);
   const contentId = useId();
-  return <section className="vi-details" aria-label="타임라인 상세 정보">
+  const section = useRef<HTMLElement>(null);
+  // The dock keeps its height, so opening the tracks brings them to the top of the dock instead of leaving them below the fold.
+  useLayoutEffect(() => {
+    if (!expanded) return;
+    const raf = requestAnimationFrame(() => section.current?.scrollIntoView({ block: 'start', behavior: 'smooth' }));
+    return () => cancelAnimationFrame(raf);
+  }, [expanded]);
+  return <section ref={section} className="vi-details" aria-label="타임라인 상세 정보">
     <button type="button" className="vi-details-toggle" aria-expanded={expanded} aria-controls={contentId} onClick={() => setExpanded(value => !value)}>
       <Layers3 size={15}/><span>구간·시안 {expanded ? '접기' : '펼치기'}</span>
       <small>댓글 · 그림 · 첨부 위치</small>{expanded ? <ChevronUp size={15}/> : <ChevronDown size={15}/>}

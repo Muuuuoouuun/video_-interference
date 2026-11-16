@@ -22,7 +22,7 @@ printf '%s' '노란 풍선 한 개' | node scripts/vertex-image.mjs --project PR
 
 ## 앱 화면에서 이미지 생성
 
-앱 화면의 **AI 이미지 생성**은 기본 비활성이다. `npm run dev`와 `npm run worker`는 Git에 포함되지 않는 `.env.vertex.local`을 서버에서만 읽는다. 프로젝트 ID와 비밀이 아닌 활성화 설정만 넣고, 인증 정보는 Google ADC에서 관리한다. 같은 이름의 셸 환경 변수가 있으면 파일 값보다 우선한다. 기존 `.env.local`은 서버에서 자동으로 읽지 않는다.
+앱 상단 **AI 생성 → 이미지 생성**은 기본 비활성이다. `npm run dev`와 `npm run worker`는 Git에 포함되지 않는 `.env.vertex.local`을 서버에서만 읽는다. 프로젝트 ID와 비밀이 아닌 활성화 설정만 넣고, 인증 정보는 Google ADC에서 관리한다. 같은 이름의 셸 환경 변수가 있으면 파일 값보다 우선한다. 기존 `.env.local`은 서버에서 자동으로 읽지 않는다.
 
 ```sh
 VI_VERTEX_GENERATION_ENABLED=1 VERTEX_PROJECT_ID=PROJECT_ID npm run dev
