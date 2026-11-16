@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { ArrowRight, Clock3, X } from 'lucide-react';
 import { commitTimecodeInput } from '../../../../packages/core/timecode-input.mjs';
 import { time } from '../format';
@@ -9,6 +9,8 @@ interface Props {
   active: boolean; available: boolean; readOnly: boolean; locked: boolean; mediaError: boolean;
   onChange: (range: { in: number; out: number }) => void;
   onMark: (edge: 'in' | 'out') => void; onStart: () => void; onClear?: () => void;
+  /** Extra action kept on the same row so the dock needs no separate footer. */
+  trailing?: ReactNode;
 }
 
 function TimeField({ frame, edge, min, max, readOnly, locked, onCommit, onMark }: {
@@ -50,7 +52,7 @@ function TimeField({ frame, edge, min, max, readOnly, locked, onCommit, onMark }
   </div>;
 }
 
-export function TimelineSelection({ frame, frameIn, frameOut, durationFrames, active, available, readOnly, locked, mediaError, onChange, onMark, onStart, onClear }: Props) {
+export function TimelineSelection({ frame, frameIn, frameOut, durationFrames, active, available, readOnly, locked, mediaError, onChange, onMark, onStart, onClear, trailing }: Props) {
   const length = frameOut - frameIn;
   return active ? <div className="vi-range-fields vi-selection" aria-label={readOnly ? '저장된 댓글 구간' : '피드백 구간 설정'}>
     <div className="vi-range-controls">
@@ -59,9 +61,9 @@ export function TimelineSelection({ frame, frameIn, frameOut, durationFrames, ac
       <TimeField key={`out-${readOnly}`} frame={frameOut} min={frameIn + 1} max={durationFrames} edge="out" readOnly={readOnly} locked={locked} onCommit={next => onChange({ in: frameIn, out: next })} onMark={() => onMark('out')}/>
       <span className="vi-range-duration" title={`${length}프레임 · 끝 시점은 포함하지 않음`}><span>길이</span><strong>{(length / 30).toFixed(2)}</strong><span>초</span></span>
     </div>
-    {onClear ? <button type="button" className="vi-range-clear" disabled={locked} onClick={onClear} title={readOnly ? '댓글 선택을 해제하고 작성 화면으로 돌아가기' : '선택 구간을 해제하고 현재 시점에 남기기'}><X size={13}/>{readOnly ? '선택 해제' : '구간 해제'}</button> : null}
+    <div className="vi-selection-actions">{onClear ? <button type="button" className="vi-range-clear" disabled={locked} onClick={onClear} title={readOnly ? '피드백 선택을 해제하고 작성 화면으로 돌아가기' : '선택 구간을 해제하고 현재 시점에 남기기'}><X size={13}/>{readOnly ? '선택 해제' : '구간 해제'}</button> : null}{trailing}</div>
   </div> : <div className="vi-point-fields vi-selection">
     <div><span className="vi-point-time"><Clock3 size={13} aria-hidden="true"/><span>현재 시점</span><strong>{time(frame)}</strong></span>{!available ? <small>선택한 피드백의 구간은 이 버전에 없습니다.</small> : null}</div>
-    {readOnly ? onClear ? <button type="button" className="vi-range-clear" disabled={locked} onClick={onClear}><X size={13}/>선택 해제</button> : null : <button type="button" className="vi-range-start" disabled={locked || mediaError} onClick={onStart}>구간 지정 <span>I / O</span></button>}
+    <div className="vi-selection-actions">{readOnly ? onClear ? <button type="button" className="vi-range-clear" disabled={locked} onClick={onClear}><X size={13}/>선택 해제</button> : null : <button type="button" className="vi-range-start" disabled={locked || mediaError} onClick={onStart}>구간 지정 <span>I / O</span></button>}{trailing}</div>
   </div>;
 }

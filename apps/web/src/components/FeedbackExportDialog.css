@@ -1,4 +1,4 @@
-.feedback-export-dialog { width: min(680px, calc(100vw - 48px)); max-height: calc(100dvh - 48px); overflow: auto; border: 1px solid #506b5b; border-radius: 9px; padding: 25px; background: #17231c; color: #e1eee6; box-shadow: 0 24px 90px #0009; }
+.feedback-export-dialog { width: min(680px, calc(100vw - 48px)); max-height: calc(100dvh - 48px); overflow: auto; border: 1px solid #506b5b; border-radius: 6px; padding: 25px; background: #17231c; color: #e1eee6; box-shadow: 0 24px 90px #0009; }
 .feedback-export-dialog::backdrop { background: #07100bd0; }
 .feedback-export-dialog header { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 24px; }
 .feedback-export-dialog header span { color: #93b39f; font-size: 11px; }
@@ -12,6 +12,6 @@
 .feedback-export-links a { color: #a7cbb5; display: inline-flex; align-items: center; gap: 5px; }
 .feedback-export-links button { font-size: 11px; }
 .feedback-export-copy-status { font-size: 11px; color: #b8ccb9; margin-top: 16px; line-height: 1.7; }
-.feedback-export-text { width: 100%; height: min(340px, 40vh); margin-top: 16px; resize: vertical; color: #dae8df; background: #0d1711; border: 1px solid #3b5847; border-radius: 5px; padding: 12px; font-size: 11px; line-height: 1.7; }
+.feedback-export-text { width: 100%; height: min(340px, 40vh); margin-top: 16px; resize: vertical; color: #dae8df; background: #0d1711; border: 1px solid #3b5847; border-radius: 4px; padding: 12px; font-size: 11px; line-height: 1.7; }
 .premiere-setup { margin-top: 20px; padding-top: 14px; border-top: 1px solid #8883; font-size: 12px; }
 .premiere-setup summary { cursor: pointer; }

@@ -130,14 +130,17 @@ test('native FFmpeg confirms transparent placement and exact IN/OUT appearance o
   const directory=await mkdtemp(join(tmpdir(),'vi-overlay-render-'));
   try {
     const {bundle,timelinePngs}=await buildPremiereBundle(state(),'v1');
-    const source=join(directory,'source.mkv');
+    // NUT keeps exact 1/30 s timestamps; Matroska rounds to milliseconds, which makes IN/OUT boundaries version-dependent.
+    const source=join(directory,'source.nut');
     execFileSync(ffmpegPath,['-y','-v','error','-f','lavfi','-i','color=c=black:s=320x180:r=30:d=3','-c:v','ffv1',source]);
     const before=digest(await readFile(source));
     const args=['-v','error','-i',source], filters=[];
     for(let i=0;i<timelinePngs.length;i++) {
       const path=join(directory,`${i}.png`);await writeFile(path,timelinePngs[i].bytes);args.push('-loop','1','-framerate','30','-i',path);
       const segment=bundle.timelineOverlays.segments[i];
-      filters.push(`[${i===0?'0:v':`v${i}`}][${i+1}:v]overlay=0:0:enable='gte(t,${segment.frameIn/30})*lt(t,${segment.frameOut/30})':format=rgb[v${i+1}]`);
+      // Place each PNG by frame count instead of a timeline `enable` expression: FFmpeg 6.x framesync evaluates `enable` one frame early.
+      filters.push(`[${i+1}:v]trim=end_frame=${segment.frameOut-segment.frameIn},setpts=PTS-STARTPTS+${segment.frameIn}/(30*TB)[o${i}]`);
+      filters.push(`[${i===0?'0:v':`v${i}`}][o${i}]overlay=0:0:eof_action=pass:format=rgb[v${i+1}]`);
     }
     args.push('-filter_complex',filters.join(';'),'-map',`[v${timelinePngs.length}]`,'-frames:v','90','-pix_fmt','rgb24','-f','rawvideo','pipe:1');
     const raw=execFileSync(ffmpegPath,args,{maxBuffer:32*1024*1024});

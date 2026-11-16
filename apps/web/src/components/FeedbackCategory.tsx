@@ -14,3 +14,16 @@ export function FeedbackCategorySelect({ value, onChange, disabled, includeNote 
     </select>
   </label>;
 }
+
+const CHIP_VALUES: (FeedbackCategory | 'note')[] = [...FEEDBACK_CATEGORIES, 'note'];
+
+/** One-click category choice for the composer. "메모" stores a note instead of feedback. */
+export function FeedbackCategoryChips({ value, onChange, disabled, label = '피드백 분야' }: {
+  value: FeedbackCategory | 'note'; onChange: (value: FeedbackCategory | 'note') => void; disabled?: boolean; label?: string;
+}) {
+  return <div className="feedback-category-chips" role="radiogroup" aria-label={label}>
+    {CHIP_VALUES.map(option => <button key={option} type="button" role="radio" aria-checked={value === option} className="feedback-category-chip" data-feedback-category={option} disabled={disabled} onClick={() => onChange(option)}>
+      <span className="feedback-category-dot" aria-hidden="true"/>{FEEDBACK_CATEGORY_LABELS[option]}
+    </button>)}
+  </div>;
+}

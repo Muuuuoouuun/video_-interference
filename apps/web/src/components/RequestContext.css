@@ -1,4 +1,4 @@
-.saved-request-context { margin-top: 16px; padding: 14px; border: 1px solid #425d50; border-radius: 7px; background: #1a2721; }
+.saved-request-context { margin-top: 16px; padding: 14px; border: 1px solid #425d50; border-radius: 5px; background: #1a2721; }
 .saved-request-context strong, .draft-heading { color: #bcf7de; font-size: 12px; font-weight: 500; }
 .saved-request-context p { margin: 8px 0 12px; color: #a7b7ad; font-size: 11px; line-height: 1.6; }
 .saved-request-context > div { display: flex; flex-wrap: wrap; gap: 8px; }

@@ -5,7 +5,7 @@
 .vi-vertical-workspace[data-compact="true"] > .vi-timeline-dock { flex-basis: 48px; height: 48px; overflow: visible; }
 .vi-vertical-resize-handle { position: absolute; left: 0; right: 0; bottom: var(--vi-timeline-height, 240px); height: 10px; transform: translateY(50%); z-index: 12; display: flex; align-items: center; justify-content: center; cursor: row-resize; touch-action: none; user-select: none; }
 .vi-vertical-resize-handle::before { content: ''; position: absolute; left: 0; right: 0; top: 4px; height: 2px; background: transparent; }
-.vi-vertical-resize-handle > span { position: relative; width: 34px; height: 3px; border-radius: 3px; background: #c5cbd4; }
+.vi-vertical-resize-handle > span { position: relative; width: 34px; height: 3px; border-radius: 2px; background: #c5cbd4; }
 .vi-vertical-resize-handle:hover::before { background: #b8c1cf; }
 .vi-vertical-resize-handle:hover > span { background: #8a99b2; }
 .vi-vertical-resize-handle:focus-visible { outline: none; }

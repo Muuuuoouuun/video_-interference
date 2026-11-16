@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm, readdir, readFile, writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import sharp from 'sharp';
@@ -9,6 +10,7 @@ import { validateDrawings } from '../apps/worker/drawings.mjs';
 import { interpretLocal, validateAiResponse } from '../apps/worker/interpreter.mjs';
 import { createGraphic, ffmpegPath, run, renderVideo } from '../apps/worker/engine.mjs';
 import { planRequestContextFrames, prepareRequestContextBundle } from '../apps/worker/context-bundle.mjs';
+import { validateHandoffManifest } from '../scripts/handoff-schema.mjs';
 
 const shape = (id = 'shape', frame) => ({ id, kind: 'rect', color: '#FF0000', fill: '#FF0000', region: { x: 0.2, y: 0.2, w: 0.3, h: 0.3 }, points: [], ...(frame === undefined ? {} : { frame }) });
 const comment = drawings => ({ id: 'request', versionId: 'original', frameIn: 0, frameOut: 60, contextFrame: 30, sourceRanges: [{ frameIn: 0, frameOut: 60 }], text: '이 그림 그대로 영상에 넣어줘', drawings, attachmentIds: [], createdAt: '2026-10-14T00:00:00Z' });
@@ -67,6 +69,14 @@ test('local bundle retains all thirty drawing scenes, range samples and ten imag
   assert.equal(manifest.modelCalled, false); assert.equal(manifest.networkUsed, false); assert.equal(manifest.preparation, 'local-only'); assert.equal(manifest.diagnostics.ffmpegRuns, 1); assert.equal(manifest.diagnostics.sceneImageCount + manifest.diagnostics.attachmentImageCount, 44);
   assert.deepEqual(manifest.drawings, request.drawings); assert.equal(manifest.drawingContexts.length, 30); assert.equal(manifest.latestInstruction, request.supplements[0].text); assert.equal(JSON.stringify(request), before);
   assert.deepEqual(JSON.parse(await readFile(manifestPath, 'utf8')), manifest);
+  await validateHandoffManifest(manifest);
+  const [entry] = manifest.feedback;
+  assert.equal(manifest.kind, 'video-feedback-context'); assert.equal(manifest.schemaVersion, 2); assert.equal(entry.id, request.id); assert.deepEqual(entry.drawings, request.drawings);
+  assert.deepEqual(entry.feedback, { original: request.text, supplements: request.supplements }); assert.deepEqual(entry.sceneDescription, manifest.sceneDescription);
+  assert.equal(entry.scenes.length, 34); assert.equal(entry.scenes.filter(scene => scene.annotatedFile).length, 30); assert.equal(manifest.diagnostics.annotationImageCount, 30);
+  assert.equal(entry.drawingProjection.length, 30); assert.ok(entry.drawingProjection.every(item => /화면 /.test(item.description)));
+  assert.equal(entry.sheet.cells.length, 34); assert.equal(entry.sheet.cells[0].frame, 80);
+  for (const file of manifest.files) assert.equal(createHash('sha256').update(await readFile(join(bundleDirectory, file.path))).digest('hex'), file.sha256);
   for (const item of [...manifest.sceneFrames, ...manifest.attachments]) { assert.ok(item.width <= 640 && item.height <= 640); assert.ok((await readFile(join(bundleDirectory, item.file))).length > 0); }
   for (const [frame, expected] of [[0, 'blue'], [49, 'red'], [80, 'green']]) { const { data } = await sharp(join(bundleDirectory, `scene-${frame}.jpg`)).removeAlpha().raw().toBuffer({ resolveWithObject: true }); const rgb = [...data.subarray(0, 3)]; assert.ok(expected === 'blue' ? rgb[2] > 180 : expected === 'red' ? rgb[0] > 180 : rgb[1] > 80, `${expected} actual still at ${frame}: ${rgb}`); }
   const voiceOriginal = join(directory, 'voice.webm'), voiceBytes = Buffer.from('original voice upload bytes'); await writeFile(voiceOriginal, voiceBytes);

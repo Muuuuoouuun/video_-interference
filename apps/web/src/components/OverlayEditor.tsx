@@ -1,7 +1,9 @@
 import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { shortcutKey } from '../../../../packages/core/shortcut-key.mjs';
+import { MOD } from '../platform';
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowDownToLine, ArrowUpToLine, Copy, SlidersHorizontal, ArrowUpRight, Circle, CornerUpLeft, CornerUpRight, Eraser, MousePointer2, Pencil, Plus, RotateCcw, Slash, Square, Trash2, Type, X } from 'lucide-react';
+import { ArrowDownToLine, ArrowUpToLine, ChevronDown, ChevronLeft, Copy, SlidersHorizontal, ArrowUpRight, Circle, CornerUpLeft, CornerUpRight, Eraser, MousePointer2, Pencil, Plus, RotateCcw, Slash, Square, Trash2, Type, X } from 'lucide-react';
 import type { Drawing, Point } from '../../../../packages/core/types';
 import { arrowHeadPoints, createDrawing, drawingBounds, drawingResizeHandles, isDrawableSize, normalizeDrawing, translateDrawing } from '../../../../packages/core/overlay-geometry.mjs';
 import type { DrawingHandle, DrawingStyle } from '../../../../packages/core/overlay-geometry.mjs';
@@ -25,6 +27,8 @@ const DEFAULT_EDITOR_STYLE: EditorStyle = { ...DEFAULT_STYLE, fontSize: 32 };
 const WIDTH_PRESETS = [{ value: 1, label: '얇게' }, { value: 3, label: '보통' }, { value: 8, label: '굵게' }, { value: 16, label: '아주 굵게' }];
 const COLORS = ['#bcf7de', '#ffffff', '#ffd166', '#ff7878', '#86baff'];
 const SHAPE_LIMIT = 30;
+const TOOLS_OPEN_KEY = 'vi.drawingToolsOpen';
+function readToolsOpen() { try { return localStorage.getItem(TOOLS_OPEN_KEY) === '1'; } catch { return false; } }
 const EMPTY_DRAWINGS: Drawing[] = [];
 const TOOL_OPTIONS: { id: Tool; label: string; shortcut: string; icon: typeof MousePointer2 }[] = [
   { id: 'select', label: '선택', shortcut: 'V', icon: MousePointer2 },
@@ -110,6 +114,9 @@ export const OverlayEditor = memo(function OverlayEditor({ drawings, currentFram
   const ownerId = `oe-${useId().replace(/:/g, '')}`;
   const svgRef = useRef<SVGSVGElement>(null);
   const [tool, setTool] = useState<Tool>('select');
+  // Docked drawing tools start folded; shortcuts keep working while folded.
+  const [toolsOpen, setToolsOpen] = useState(readToolsOpen);
+  useEffect(() => { try { localStorage.setItem(TOOLS_OPEN_KEY, toolsOpen ? '1' : '0'); } catch { /* Per-viewer convenience only. */ } }, [toolsOpen]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [toolStyles, setToolStyles] = useState<Partial<Record<Drawing['kind'], EditorStyle>>>({});
   const [popover, setPopover] = useState<StylePopover | null>(null);
@@ -375,15 +382,15 @@ export const OverlayEditor = memo(function OverlayEditor({ drawings, currentFram
 
     const handleKey = (event: KeyboardEvent) => {
       const current = latestRef.current;
-      if (event.defaultPrevented || event.isComposing || event.keyCode === 229 || !activeRef.current || current.blocked || current.readOnly) return;
+      if (event.defaultPrevented || !activeRef.current || current.blocked || current.readOnly) return;
       const target = event.target as HTMLElement | null;
+      // Text entry is excluded here, so composition state alone never blocks a tool or undo shortcut.
       if (target?.closest('input, textarea, select, [contenteditable="true"]')) return;
       if (target && target !== document.body && !target.closest(`[data-overlay-owner="${ownerId}"]`)) return;
-      const key = event.key.toLowerCase();
+      // The typed letter on Latin layouts; the physical key under a Hangul input source (also for ⌘/Ctrl + Z, D, Y).
+      const key = shortcutKey(event);
       const modifier = event.metaKey || event.ctrlKey;
-      // Physical keys also work with a Korean keyboard layout, outside text input.
-      const toolKey = /^Key[A-Z]$/.test(event.code) ? event.code.slice(3).toLowerCase() : key;
-      const shortcutTool = !modifier && !event.altKey ? TOOL_OPTIONS.find(item => item.shortcut.toLowerCase() === toolKey) : undefined;
+      const shortcutTool = !modifier && !event.altKey ? TOOL_OPTIONS.find(item => item.shortcut.toLowerCase() === key) : undefined;
       if (shortcutTool) {
         chooseTool(shortcutTool.id); svgRef.current?.focus({ preventScroll: true });
         event.preventDefault(); event.stopPropagation(); return;
@@ -413,7 +420,7 @@ export const OverlayEditor = memo(function OverlayEditor({ drawings, currentFram
         if (session.updateGroup(next)) { emit(session.present); setHistoryFrameHint(null); }
         handled = true;
       } else if (!modifier && !event.altKey) {
-        if (toolKey === 'd') { chooseTool(current.tool === 'rect' ? 'select' : 'rect'); handled = true; }
+        if (key === 'd') { chooseTool(current.tool === 'rect' ? 'select' : 'rect'); handled = true; }
       }
       if (handled) { event.preventDefault(); event.stopPropagation(); }
     };
@@ -576,7 +583,13 @@ export const OverlayEditor = memo(function OverlayEditor({ drawings, currentFram
     {historyFrameHint !== null && historyFrameHint !== currentFrame && onFrameSelect ? <button className="oe-history-frame-link" disabled={blocked} onClick={() => onFrameSelect(historyFrameHint)}>변경 장면 {frameTime(historyFrameHint)} 보기</button> : null}
   </div>;
   const canvasStyle: CSSProperties = { left: viewport.left, top: viewport.top, width: viewport.width, height: viewport.height, display: !enabled ? 'none' : undefined, pointerEvents: readOnly || blocked ? 'none' : undefined };
-  const tools = <div className="oe-toolbar-main" data-overlay-owner={ownerId} data-history-revision={historyRevision}>
+  const activeTool = TOOL_OPTIONS.find(item => item.id === tool) ?? TOOL_OPTIONS[0];
+  const ActiveToolIcon = tool === 'select' ? Pencil : activeTool.icon;
+  const toolsFolded = Boolean(toolsHost) && !toolsOpen;
+  const tools = toolsFolded ? <div className="oe-toolbar-main oe-toolbar-folded" data-overlay-owner={ownerId} data-history-revision={historyRevision}>
+      <button type="button" className={`oe-tools-toggle${tool !== 'select' ? ' oe-tool-active' : ''}`} disabled={blocked} aria-expanded={false} aria-label="그리기 도구 펼치기" title="그리기 도구 펼치기 · 접힌 상태에서도 V P B E L A T 단축키 사용" onClick={() => setToolsOpen(true)}><ActiveToolIcon size={16}/><span>{tool === 'select' ? '그리기' : activeTool.label}</span><ChevronDown size={13}/></button>
+    </div> : <div className="oe-toolbar-main" data-overlay-owner={ownerId} data-history-revision={historyRevision}>
+      {toolsHost ? <button type="button" className="oe-tools-collapse" aria-expanded={true} aria-label="그리기 도구 접기" title="그리기 도구 접기" onClick={() => { setPopover(null); setToolsOpen(false); }}><ChevronLeft size={15}/></button> : null}
       <div className="oe-tool-group" role="group" aria-label="영상 위 그림 도구">{TOOL_OPTIONS.map(({ id, label, shortcut, icon: Icon }) => <button key={id} className={`oe-tool${tool === id ? ' oe-tool-active' : ''}`} disabled={blocked} onClick={event => {
         popoverTrigger.current = event.currentTarget;
         if (tool !== id) { chooseTool(id); return; }
@@ -591,7 +604,7 @@ export const OverlayEditor = memo(function OverlayEditor({ drawings, currentFram
         const anchor = event.currentTarget.getBoundingClientRect();
         setPopover(current => current ? null : { anchor, ...(selected?.kind === 'text' ? { textId: selected.id } : {}) });
       }} title="스타일과 편집"><i style={{ background: style.color }}/><span>{selected ? '편집' : textStyle ? `${Math.round(style.fontSize)} 글자` : `${style.strokeWidth} 선`}</span><SlidersHorizontal size={13}/></button>
-      <div className="oe-history-actions"><button disabled={blocked || !enabled || !history?.canUndo} onClick={undo} aria-label="그림 편집 되돌리기" title="전체 그림 기록 되돌리기 (⌘/Ctrl Z)"><CornerUpLeft size={16} /></button><button disabled={blocked || !enabled || !history?.canRedo} onClick={redo} aria-label="그림 편집 다시 실행" title="전체 그림 기록 다시 실행 (⌘/Ctrl Shift Z)"><CornerUpRight size={16} /></button><span className="oe-toolbar-divider" /><button disabled={blocked || !enabled || !selected} onClick={deleteSelected} aria-label="선택한 그림 삭제" title="선택 삭제 (Delete)"><Trash2 size={15} /></button><button disabled={blocked || !enabled || !visibleDrawings.length} onClick={clearCurrentFrame} aria-label="현재 프레임 그림 지우기" title="현재 프레임 그림만 지우기"><Eraser size={16} /></button></div>
+      <div className="oe-history-actions"><button disabled={blocked || !enabled || !history?.canUndo} onClick={undo} aria-label="그림 편집 되돌리기" title={`전체 그림 기록 되돌리기 (${MOD} + Z)`}><CornerUpLeft size={16} /></button><button disabled={blocked || !enabled || !history?.canRedo} onClick={redo} aria-label="그림 편집 다시 실행" title={`전체 그림 기록 다시 실행 (${MOD} + Shift + Z)`}><CornerUpRight size={16} /></button><span className="oe-toolbar-divider" /><button disabled={blocked || !enabled || !selected} onClick={deleteSelected} aria-label="선택한 그림 삭제" title="선택 삭제 (Delete)"><Trash2 size={15} /></button><button disabled={blocked || !enabled || !visibleDrawings.length} onClick={clearCurrentFrame} aria-label="현재 프레임 그림 지우기" title="현재 프레임 그림만 지우기"><Eraser size={16} /></button></div>
       {onInsertDrawings ? <button className="oe-insert-button" disabled={blocked || !enabled || !drawings.length || multipleFrames} onClick={() => { endEditGroup(); if (!multipleFrames) onInsertDrawings(); }} title={multipleFrames ? '원하는 장면만 복사한 요청에서 영상에 넣어 주세요.' : '이 그림으로 영상 삽입 요청을 만듭니다. 승인 후 렌더에 적용됩니다.'}><Plus size={14} />영상에 넣기</button> : null}
     </div>;
   const stylePanel = popover && !readOnly ? <div ref={popoverRef} id={`${ownerId}-style`} className="oe-toolbar oe-style-popover" data-overlay-owner={ownerId} role="dialog" aria-label={editingText ? '텍스트 입력' : '그림 스타일'} tabIndex={-1}
@@ -601,7 +614,7 @@ export const OverlayEditor = memo(function OverlayEditor({ drawings, currentFram
       else if (editingText && (event.metaKey || event.ctrlKey) && event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); submitText(); }
     }}>
     <header><strong>{editingText ? popover.textId ? '텍스트 수정' : '텍스트 넣기' : `${TOOL_OPTIONS.find(item => item.id === (selected?.kind ?? tool))?.label ?? '그림'} 스타일`}</strong><button type="button" aria-label="스타일 팝업 닫기" onClick={() => closePopover(true)}><X size={14}/></button></header>
-    {editingText ? <label className="oe-text-entry">내용<textarea ref={textInputRef} aria-label="영상 위 텍스트 내용" value={textDraft} maxLength={MAX_DRAWING_TEXT} rows={3} placeholder="영상 위에 남길 텍스트" onChange={event => setTextDraft(event.target.value)}/><small>{drawingTextLines(textDraft).length > MAX_DRAWING_TEXT_LINES ? '최대 8줄까지 입력할 수 있습니다.' : '최대 500자 · 8줄 · ⌘ / Ctrl + Enter 적용'}</small></label> : null}
+    {editingText ? <label className="oe-text-entry">내용<textarea ref={textInputRef} aria-label="영상 위 텍스트 내용" value={textDraft} maxLength={MAX_DRAWING_TEXT} rows={3} placeholder="영상 위에 남길 텍스트" onChange={event => setTextDraft(event.target.value)}/><small>{drawingTextLines(textDraft).length > MAX_DRAWING_TEXT_LINES ? '최대 8줄까지 입력할 수 있습니다.' : `최대 500자 · 8줄 · ${MOD} + Enter 적용`}</small></label> : null}
     <div className="oe-style-controls" aria-label="그림 스타일">
       <span className="oe-style-target">{editingText ? popover?.textId ? '텍스트 수정' : '새 텍스트' : selected ? '선택한 그림' : '새 그림'}</span>
       <div className="oe-style-preview" aria-label="스타일 미리보기"><svg viewBox="0 0 240 48" aria-hidden="true">
@@ -616,7 +629,7 @@ export const OverlayEditor = memo(function OverlayEditor({ drawings, currentFram
     </div>
 
     {selected ? <div className="oe-object-actions" role="group" aria-label="선택한 그림 편집">
-      <button disabled={drawings.length >= SHAPE_LIMIT || blocked || !enabled || editingText && textDraft !== selected.text} onClick={duplicateSelected} title={editingText && textDraft !== selected.text ? '텍스트를 적용한 뒤 복제하세요' : '⌘ / Ctrl + D'}><Copy size={14}/>복제</button>
+      <button disabled={drawings.length >= SHAPE_LIMIT || blocked || !enabled || editingText && textDraft !== selected.text} onClick={duplicateSelected} title={editingText && textDraft !== selected.text ? '텍스트를 적용한 뒤 복제하세요' : `${MOD} + D`}><Copy size={14}/>복제</button>
       <button disabled={visibleDrawings.at(-1)?.id === selected.id || blocked || !enabled} onClick={() => reorderSelected('front')}><ArrowUpToLine size={14}/>맨 앞으로</button>
       <button disabled={visibleDrawings[0]?.id === selected.id || blocked || !enabled} onClick={() => reorderSelected('back')}><ArrowDownToLine size={14}/>맨 뒤로</button>
     </div> : null}
@@ -627,7 +640,8 @@ export const OverlayEditor = memo(function OverlayEditor({ drawings, currentFram
     {!toolsHost ? tools : null}
     {onInsertDrawings && multipleFrames ? <p className="oe-insert-frame-warning">여러 장면의 그림입니다. 선택한 장면만 복사한 새 요청에서 영상에 넣어 주세요.</p> : null}
     {frameGroups.length > 0 || historyFrameHint !== null ? sceneNavigation : null}
-    <div className="oe-editor-status"><span>{blocked ? blockedLabel : !enabled ? '재생 중 · 위치 메모 숨김' : selected ? '드래그로 이동 · 핸들로 크기 조절 · 방향키로 1px 이동 · 길게 누른 이동은 한 번에 되돌리기' : onInsertDrawings ? '위치 메모 · 영상에 넣으려면 삽입 요청 후 승인' : '표시한 위치·그림은 피드백에 함께 저장됩니다.'}</span><span role="status">{notice || (tool === 'pen' ? '펜 연속 그리기 · V 선택 · B 박스 · T 텍스트' : tool === 'text' ? '클릭해 텍스트 연속 입력 · V 선택 · P 펜' : 'V 선택 · P 펜 · B 박스 · E 원 · L 선 · A 화살표 · T 텍스트')}</span></div>
+    {/* Shortcut lists live in the footer bar; only contextual guidance stays here. */}
+    {(() => { const guidance = blocked ? blockedLabel : !enabled ? '재생 중 · 위치 메모 숨김' : selected ? '드래그로 이동 · 핸들로 크기 조절 · 방향키로 1px 이동' : onInsertDrawings && drawings.length ? '위치 메모 · 영상에 넣으려면 삽입 요청 후 승인' : ''; return guidance || notice ? <div className="oe-editor-status"><span>{guidance}</span><span role="status">{notice}</span></div> : null; })()}
   </div>;
 
   return <>

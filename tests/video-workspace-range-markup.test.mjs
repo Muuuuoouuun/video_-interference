@@ -236,3 +236,14 @@ test('SSR categories color saved pins, projected spans and the selected range co
   assert.match(mixed, /data-mixed="true"/);
   assert.match(mixed, /aria-description="영상·사운드 분야"/);
 });
+
+test('SSR keeps the compose action on the selection row in point, range and review states, with no separate dock footer', () => {
+  const point = markup({ composeLabel: '현재 시점에 피드백' });
+  assert.doesNotMatch(point, /vi-workspace-bottom/);
+  assert.match(point, /class="vi-point-fields vi-selection">.*class="vi-selection-actions">.*class="vi-range-start".*class="vi-compose-button"[^>]*aria-keyshortcuts="C"/s);
+  assert.equal((point.match(/class="vi-compose-button"/g) ?? []).length, 1);
+  const range = markup({ rangeActive: true, composeLabel: '선택 구간에 피드백' });
+  assert.match(range, /class="vi-range-fields vi-selection".*class="vi-selection-actions">.*구간 해제.*class="vi-compose-button".*선택 구간에 피드백/s);
+  const review = markup({ selectedCommentId: comment.id, annotationsReadOnly: true, range: { in: 420, out: 421 }, composeLabel: '현재 시점에 피드백' });
+  assert.match(review, /class="vi-selection-actions">.*선택 해제.*class="vi-compose-button"/s);
+});

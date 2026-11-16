@@ -12,3 +12,12 @@
 - Use `npm run build` and `npm test` for relevant verification. Test actual native FFmpeg results for editing changes.
 - Install dependencies with `npm install --bin-links=false` on this external disk. Build and dev scripts invoke package executables directly.
 - Keep `storage/`, credentials, local demo videos, and generated build files out of Git.
+
+## Reading feedback handoffs (AI and tools)
+
+- Read text first: `feedback.jsonl` (one feedback per line) or `manifest.json`. Open `sheets/feedback-NNNN.jpg` only when the text cannot settle the scene or drawing target, then individual `scenes/` or `annotations/` stills. Use `overview/grid.jpg` for the whole-video flow. Never request or reconstruct the video files. Format: `docs/AI전달형식.md`, schema `schema/feedback-handoff.schema.json`.
+- Get the text without the UI: `npm run export -- --format jsonl` (or `md`, `json`, `vtt`, `paths`). The CLI opens the app database read-only and never calls a model, the network or transcription.
+- Keep provenance: `sceneDescription.source: "user"`, transcripts `source: "asr"` (automatic, verify against the audio), observations `source: "model"` (stale when the feedback changed). Never present one as another or let model text replace user text.
+- Drawing sentences, overview grids and shot lists are local computations; shot cuts are estimates (`estimated: true`).
+- Local transcription runs only when the user presses the voice memo's transcribe action and `WHISPER_CPP_PATH` and `WHISPER_MODEL_PATH` are set. Saving or exporting never starts it. Do not add cloud transcription without user direction.
+- Gemini tests send one sheet per feedback by default (`--detail full` for every still). Transcript text is sent only with `--include-transcripts`; audio files are never sent.

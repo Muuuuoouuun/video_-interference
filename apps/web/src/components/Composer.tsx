@@ -1,19 +1,39 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
-import { Paperclip, Mic, Square, Send, LoaderCircle, Clock3, Brackets, Plus, ChevronUp, X, PencilLine } from 'lucide-react';
+import { Paperclip, Mic, FileAudio, Square, Send, LoaderCircle, Clock3, Brackets, Plus, ChevronUp, X, PencilLine } from 'lucide-react';
 import type { Attachment, Drawing, FeedbackCategory } from '../../../../packages/core/types';
 import { time } from '../format';
 import { upload } from '../api';
 import { acquireMicrophone, stopMicrophone } from '../../../../packages/core/microphone-session.mjs';
 import { createPendingVoiceUpload, type PendingVoiceSession, type PendingVoiceUpload } from '../../../../packages/core/pending-voice-upload.mjs';
 import { drawingFrame, groupDrawings } from '../../../../packages/core/drawing-anchors.mjs';
-import { IMAGE_ATTACHMENT_LIMIT, commentAttachmentInput } from '../../../../packages/core/comment-attachments.mjs';
+import { IMAGE_ATTACHMENT_LIMIT, VOICE_MAX_BYTES, VOICE_MAX_SECONDS, commentAttachmentInput, splitAttachmentFiles } from '../../../../packages/core/comment-attachments.mjs';
+import { COMPOSER_DRAFT_KEY, decodeComposerDraft, encodeComposerDraft, type ComposerDraft, type ComposerDraftAnchor } from '../../../../packages/core/composer-draft.mjs';
 import { AttachmentGallery } from './AttachmentGallery';
-import { FeedbackCategorySelect } from './FeedbackCategory';
+import { SubmitTextarea } from './SubmitTextarea';
+import { FeedbackCategoryChips } from './FeedbackCategory';
 import './Composer.css';
+const duration = (seconds: number) => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+const PLACEHOLDERS: Record<FeedbackCategory | 'note', string> = {
+  video: '어떻게 고칠까요? (예: 다른 컷으로 교체)',
+  subtitle: '어떻게 고칠까요? (예: 오타 수정, 자막 아래로)',
+  audio: '어떻게 고칠까요? (예: 배경음 줄이기)',
+  effect: '어떻게 고칠까요? (예: 전환을 더 짧게)',
+  note: '이 장면에 기억해 둘 내용',
+};
 export interface RequestAnchor { in: number; out: number; contextFrame?: number; drawings?: Drawing[] }
 export interface RequestOptions { kind: 'request' | 'note'; category?: FeedbackCategory; interpretNow: boolean; sceneDescription?: string }
-interface Props { range: { in: number; out: number }; currentFrame:number; drawingContextFrame?: number; drawings: Drawing[]; busy: boolean; editingMode?: boolean; anchorMode?: 'point' | 'range'; onAnchorModeChange?: (mode: 'point' | 'range') => void; onClearRange?: () => void; onBeginWriting?: () => number | undefined; textareaRef: React.RefObject<HTMLTextAreaElement | null>; onSubmit: (text: string, attachmentIds: string[], voiceId?: string, anchor?: RequestAnchor, options?: RequestOptions) => Promise<void>; onError: (message: string) => void; onActivityChange?: (active: boolean) => void; onAnchorLockChange?: (locked: boolean) => void; onDraftChange?: (hasContent: boolean) => void }
-export function Composer({ range, currentFrame, drawingContextFrame, drawings, busy, editingMode = false, anchorMode = 'point', onAnchorModeChange, onClearRange, onBeginWriting, textareaRef, onSubmit, onError, onActivityChange, onAnchorLockChange, onDraftChange }: Props) {
+interface Props { range: { in: number; out: number }; currentFrame:number; drawingContextFrame?: number; drawings: Drawing[]; busy: boolean; editingMode?: boolean; anchorMode?: 'point' | 'range'; onAnchorModeChange?: (mode: 'point' | 'range') => void; onClearRange?: () => void; onBeginWriting?: () => number | undefined; textareaRef: React.RefObject<HTMLTextAreaElement | null>; onSubmit: (text: string, attachmentIds: string[], voiceId?: string, anchor?: RequestAnchor, options?: RequestOptions) => Promise<void>; onError: (message: string) => void; onActivityChange?: (active: boolean) => void; onAnchorLockChange?: (locked: boolean) => void; onDraftChange?: (hasContent: boolean) => void; draftVersionId?: string; durationFrames?: number; onRestoreDraft?: (anchor: ComposerDraftAnchor) => boolean }
+function readStoredDraft(versionId?: string, durationFrames?: number): ComposerDraft | null {
+  if (!versionId) return null;
+  try { return decodeComposerDraft(window.localStorage.getItem(COMPOSER_DRAFT_KEY), versionId, durationFrames); } catch { return null; }
+}
+function writeStoredDraft(raw: string | null) {
+  try { if (raw) window.localStorage.setItem(COMPOSER_DRAFT_KEY, raw); else window.localStorage.removeItem(COMPOSER_DRAFT_KEY); } catch { /* Drafts still work in memory without storage. */ }
+}
+export function Composer({ range, currentFrame, drawingContextFrame, drawings, busy, editingMode = false, anchorMode = 'point', onAnchorModeChange, onClearRange, onBeginWriting, textareaRef, onSubmit, onError, onActivityChange, onAnchorLockChange, onDraftChange, draftVersionId, durationFrames, onRestoreDraft }: Props) {
+  // A typed draft survives reloads and crashes. Recovery is offered, never applied silently, so the anchor stays explicit.
+  const [recovery, setRecovery] = useState<ComposerDraft | null>(() => readStoredDraft(draftVersionId, durationFrames));
+  const lastStoredDraft = useRef<string | null | undefined>(null);
   const [optionsOpen, setOptionsOpen] = useState(false);
   const optionsId = useId();
   const [text, setText] = useState('');
@@ -26,12 +46,14 @@ export function Composer({ range, currentFrame, drawingContextFrame, drawings, b
   const [recording, setRecording] = useState(false);
   const [requestingMicrophone, setRequestingMicrophone] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
+  const [recordSeconds, setRecordSeconds] = useState(0);
   const [pendingVoice, setPendingVoice] = useState<PendingVoiceUpload<RequestAnchor> | null>(null);
   const [saving, setSaving] = useState(false);
   const [draggingImage, setDraggingImage] = useState(false);
   const imageUploadInFlight = useRef(false);
   const dragDepth = useRef(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  const voiceInputRef = useRef<HTMLInputElement>(null);
   const recorder = useRef<MediaRecorder|null>(null);
   const microphoneRequest = useRef<AbortController|null>(null);
   const mounted = useRef(true);
@@ -58,11 +80,38 @@ export function Composer({ range, currentFrame, drawingContextFrame, drawings, b
   const displayedRange = pendingVoice?.anchor ?? (hasVoice && voiceAnchor.current ? voiceAnchor.current : effectiveRange);
   const displayPoint = hasVoice || pendingVoice ? displayedRange.out - displayedRange.in === 1 : usingPoint;
   const displayedContextFrame = pendingVoice?.anchor.contextFrame ?? (hasVoice ? voiceAnchor.current?.contextFrame : undefined) ?? currentFrame;
-  const activeOptions = [sceneDescription.trim() ? '장면 설명' : '', kind === 'note' ? '메모로 저장' : '', editingMode && kind === 'request' && interpretNow ? '저장 후 해석' : '', editingMode && role === 'insert' ? '이미지 삽입' : ''].filter(Boolean);
+  const activeOptions = [sceneDescription.trim() ? '장면 설명' : '', editingMode && kind === 'request' && interpretNow ? '저장 후 해석' : '', editingMode && role === 'insert' ? '이미지 삽입' : ''].filter(Boolean);
   const anchorLocked = busy || saving || recording || requestingMicrophone || uploading || hasVoice || Boolean(pendingVoice);
   const fallbackDrawingFrame = drawingContextFrame ?? currentFrame;
   const drawingGroups = useMemo(() => groupDrawings(drawings, fallbackDrawingFrame), [drawings, fallbackDrawingFrame]);
   useEffect(() => { onDraftChange?.(hasDraft); }, [hasDraft, onDraftChange]);
+  const storedAnchor: ComposerDraftAnchor = { mode: displayPoint ? 'point' : 'range', in: displayedRange.in, out: displayedRange.out, contextFrame: displayedContextFrame };
+  const storedDraft = draftVersionId ? encodeComposerDraft({ versionId: draftVersionId, text, sceneDescription, kind, category, anchor: storedAnchor, savedAt: null }) : null;
+  useEffect(() => {
+    // Keep an unresolved recovery offer intact until the user restores or discards it.
+    if (recovery || !draftVersionId || storedDraft === lastStoredDraft.current) return;
+    lastStoredDraft.current = storedDraft;
+    writeStoredDraft(storedDraft && JSON.stringify({ ...JSON.parse(storedDraft), savedAt: new Date().toISOString() }));
+  }, [storedDraft, recovery, draftVersionId]);
+  function restoreDraft() {
+    if (!recovery || hasDraft || anchorLocked) return;
+    if (onRestoreDraft && !onRestoreDraft(recovery.anchor)) return;
+    setText(recovery.text); setSceneDescription(recovery.sceneDescription); setKind(recovery.kind); setCategory(recovery.category);
+    if (recovery.sceneDescription.trim()) setOptionsOpen(true);
+    setRecovery(null);
+    requestAnimationFrame(() => textareaRef.current?.focus());
+  }
+  function discardDraft() { setRecovery(null); lastStoredDraft.current = undefined; writeStoredDraft(null); }
+  // Stop a little before the worker's duration limit so a long take is never rejected after recording.
+  useEffect(() => {
+    if (!recording) return;
+    const started = performance.now(); setRecordSeconds(0);
+    const timer = setInterval(() => {
+      const seconds = Math.floor((performance.now() - started) / 1000); setRecordSeconds(seconds);
+      if (seconds >= VOICE_MAX_SECONDS - 2 && recorder.current?.state === 'recording') recorder.current.stop();
+    }, 250);
+    return () => clearInterval(timer);
+  }, [recording]);
   useEffect(() => { if (!editingMode) setInterpretNow(false); }, [editingMode]);
   useEffect(() => { onActivityChange?.(recording || requestingMicrophone || uploading || saving); }, [recording, requestingMicrophone, uploading, saving, onActivityChange]);
   useEffect(() => { onAnchorLockChange?.(hasVoice || Boolean(pendingVoice)); }, [hasVoice, pendingVoice, onAnchorLockChange]);
@@ -75,24 +124,40 @@ export function Composer({ range, currentFrame, drawingContextFrame, drawings, b
   }
   async function attachFiles(files: File[]) {
     if (busy || saving || uploading || recording || requestingMicrophone || imageUploadInFlight.current) return;
-    const images = files.filter(file => ['image/png', 'image/jpeg', 'image/webp'].includes(file.type));
-    if (!images.length) { onError('PNG, JPG, WebP 이미지를 선택해 주세요.'); return; }
+    const { images, voice, extraVoice, rejected } = splitAttachmentFiles(files);
+    if (!images.length && !voice) { onError('PNG, JPG, WebP 이미지나 음성 파일을 선택해 주세요.'); return; }
+    if (voice && voiceUpload.current?.pending) { onError('보관 중인 음성을 먼저 다시 저장하거나 버려 주세요.'); return; }
+    if (voice && voice.size > VOICE_MAX_BYTES) { onError(`${voice.name}: 음성 파일은 ${VOICE_MAX_BYTES / 1_000_000}MB 이하여야 합니다. 업로드하지 않았습니다.`); return; }
     const available = Math.max(0, IMAGE_ATTACHMENT_LIMIT - imageCount);
     if (images.length > available) { onError(`이미지는 최대 ${IMAGE_ATTACHMENT_LIMIT}장까지 첨부할 수 있습니다. 현재 ${imageCount}장, 추가 가능 ${available}장입니다. 이번에 선택한 파일은 업로드하지 않았습니다.`); return; }
-    if (images.length !== files.length) onError(`PNG, JPG, WebP 외의 파일 ${files.length - images.length}개는 제외됩니다.`);
+    const skipped = [rejected.length ? `이미지·음성 외의 파일 ${rejected.length}개` : '', extraVoice.length ? `추가 음성 파일 ${extraVoice.length}개(음성은 피드백당 1개)` : ''].filter(Boolean);
+    if (skipped.length) onError(`${skipped.join(', ')}는 제외됩니다.`);
     setOptionsOpen(true);
-    onBeginWriting?.();
+    // A voice file anchors to where it was attached, like a recording anchors to where it started.
+    if (voice && voiceUpload.current?.stage(voice, voice.name || '음성 파일', captureAnchor())) void voiceUpload.current.retry();
+    else onBeginWriting?.();
+    if (!images.length) return;
     const fileRole = editingMode ? role : 'reference';
     imageUploadInFlight.current = true;
     setUploadingImage(true);
     try {
-      for (const file of images) {
-        try {
-          const attachment = await upload<Attachment>('/api/attachments', file, file.name || '참고 이미지.png', fileRole);
-          if (!mounted.current) return;
-          setAttachments(items => [...items, attachment]);
-        } catch (error) { if (mounted.current) onError(`${file.name}: ${(error as Error).message}`); }
-      }
+      // Three uploads at a time; finished images still appear in the order they were chosen.
+      const results: (Attachment | null | undefined)[] = new Array(images.length);
+      let next = 0, shown = 0;
+      const flush = () => {
+        const ready: Attachment[] = [];
+        while (shown < images.length && results[shown] !== undefined) { const item = results[shown++]; if (item) ready.push(item); }
+        if (ready.length && mounted.current) setAttachments(items => [...items, ...ready]);
+      };
+      const worker = async () => {
+        while (next < images.length) {
+          const index = next++, file = images[index];
+          try { results[index] = await upload<Attachment>('/api/attachments', file, file.name || '참고 이미지.png', fileRole); }
+          catch (error) { results[index] = null; if (mounted.current) onError(`${file.name}: ${(error as Error).message}`); }
+          flush();
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(3, images.length) }, worker));
     } finally { imageUploadInFlight.current = false; if (mounted.current) setUploadingImage(false); }
   }
   async function toggleRecording() {
@@ -116,36 +181,38 @@ export function Composer({ range, currentFrame, drawingContextFrame, drawings, b
     if (!canSubmit || busy || uploading || recording || requestingMicrophone || submitting.current || voiceUpload.current?.pending) return;
     submitting.current = true;
     setSaving(true);
-    try { const { attachmentIds, voiceAssetId } = commentAttachmentInput(attachments); await onSubmit(text.trim(), attachmentIds, voiceAssetId, voiceAssetId ? voiceAnchor.current : captureAnchor(), {kind,category:kind === 'note' ? undefined : category,interpretNow:editingMode && kind === 'request' && interpretNow,sceneDescription:sceneDescription.trim() || undefined}); setText(''); setSceneDescription(''); setAttachments([]); setOptionsOpen(false); setKind('request'); setInterpretNow(false); setRole('reference'); voiceAnchor.current = undefined; } catch { /* Keep the description, feedback and attachments available for retry. */ } finally { submitting.current = false; if (mounted.current) setSaving(false); }
+    try { const { attachmentIds, voiceAssetId } = commentAttachmentInput(attachments); await onSubmit(text.trim(), attachmentIds, voiceAssetId, voiceAssetId ? voiceAnchor.current : captureAnchor(), {kind,category:kind === 'note' ? undefined : category,interpretNow:editingMode && kind === 'request' && interpretNow,sceneDescription:sceneDescription.trim() || undefined}); lastStoredDraft.current = null; writeStoredDraft(null); setText(''); setSceneDescription(''); setAttachments([]); setOptionsOpen(false); setKind('request'); setInterpretNow(false); setRole('reference'); voiceAnchor.current = undefined; } catch { /* Keep the description, feedback and attachments available for retry. */ } finally { submitting.current = false; if (mounted.current) setSaving(false); }
   }
   return <div className="composer-wrap"><form className={`composer${draggingImage ? ' composer-dragging' : ''}`}
-    onPaste={event => { const images = Array.from(event.clipboardData.files).filter(file => file.type.startsWith('image/')); if (images.length) { event.preventDefault(); void attachFiles(images); } }}
+    onPaste={event => { const files = Array.from(event.clipboardData.files).filter(file => file.type.startsWith('image/') || file.type.startsWith('audio/')); if (files.length) { event.preventDefault(); void attachFiles(files); } }}
     onDragEnter={event => { if (event.dataTransfer.types.includes('Files')) { event.preventDefault(); dragDepth.current++; setDraggingImage(true); } }}
     onDragOver={event => { if (event.dataTransfer.types.includes('Files')) { event.preventDefault(); event.dataTransfer.dropEffect = busy || uploading || saving || recording || requestingMicrophone ? 'none' : 'copy'; } }}
     onDragLeave={event => { if (event.dataTransfer.types.includes('Files')) { dragDepth.current = Math.max(0, dragDepth.current - 1); if (!dragDepth.current) setDraggingImage(false); } }}
     onDrop={event => { if (!event.dataTransfer.types.includes('Files')) return; event.preventDefault(); dragDepth.current = 0; setDraggingImage(false); void attachFiles(Array.from(event.dataTransfer.files)); }}
     onSubmit={e => { e.preventDefault(); void submit(); }}>
     <input hidden type="file" multiple accept="image/png,image/jpeg,image/webp" ref={inputRef} onChange={event => { const files = Array.from(event.target.files ?? []); if (files.length) void attachFiles(files); event.target.value = ''; }}/>
+    <input hidden type="file" accept="audio/*,.m4a,.mp3,.wav,.aac,.ogg,.opus,.flac" ref={voiceInputRef} onChange={event => { const files = Array.from(event.target.files ?? []); if (files.length) void attachFiles(files); event.target.value = ''; }}/>
+    {recovery ? <div className="composer-recovery" role="status"><p><strong>저장하지 않은 {recovery.kind === 'note' ? '메모' : '피드백'} 초안이 있습니다</strong><span>{recovery.anchor.mode === 'range' ? `${time(recovery.anchor.in)}–${time(recovery.anchor.out)}` : time(recovery.anchor.contextFrame)} · “{(recovery.text || recovery.sceneDescription).trim().slice(0, 40)}{(recovery.text || recovery.sceneDescription).trim().length > 40 ? '…' : ''}”</span><small>글과 시점만 복구합니다. 그림·이미지·음성은 다시 추가해 주세요.</small></p><div><button type="button" className="secondary" disabled={hasDraft || anchorLocked} title={hasDraft ? '지금 작성 중인 내용을 저장하거나 비운 뒤 복구할 수 있습니다.' : '초안을 작성 시점으로 복구'} onClick={restoreDraft}>복구</button><button type="button" className="quiet" disabled={saving} onClick={discardDraft}>버리기</button></div></div> : null}
     <div className="composer-context">
       <span className="composer-time-chip"><Clock3 size={13} aria-hidden="true"/><span className="composer-anchor-label">{hasVoice || pendingVoice ? '음성 기준' : '현재 시점'}</span><strong>{time(displayPoint ? displayedRange.in : displayedContextFrame)}</strong></span>
       {!displayPoint ? <span className="composer-range-chip" title="선택 구간 · 끝 시점은 포함하지 않음"><Brackets size={13} aria-hidden="true"/><span className="composer-anchor-label">구간</span><strong>{time(displayedRange.in)}<span className="composer-time-separator">–</span>{time(displayedRange.out)}</strong><button type="button" aria-label="선택 구간 해제" title="구간을 해제하고 현재 시점에 남기기" disabled={anchorLocked || !onClearRange && !onAnchorModeChange} onClick={() => onClearRange ? onClearRange() : onAnchorModeChange?.('point')}><X size={13}/></button></span> : <button type="button" className="composer-select-range" disabled={anchorLocked || !onAnchorModeChange} onClick={() => onAnchorModeChange?.('range')}>구간 지정</button>}
     </div>
     {drawings.length > 0 ? <div className="composer-drawing-context"><PencilLine size={12}/><span>그림 {drawings.length}개 · {drawingGroups.length}개 장면{drawingGroups.some(group => group.frame < displayedRange.in || group.frame >= displayedRange.out) ? ' · 다른 시점의 참고 그림 포함' : ''}</span></div> : null}
-    <div className="composer-category-row"><span>분야</span><FeedbackCategorySelect value={kind === 'note' ? 'note' : category} includeNote disabled={busy || saving || recording || requestingMicrophone || uploading} onChange={value => { if (value === 'note') setKind('note'); else { setKind('request'); setCategory(value); } }}/></div>
-    <label className="composer-feedback-field"><textarea disabled={busy || saving} ref={textareaRef} aria-label={kind === 'note' ? '메모 내용' : '피드백 내용'} placeholder={kind === 'note' ? '이 장면에 기억해 둘 내용을 적어 주세요.' : '이 장면에서 바꾸고 싶은 내용을 적어 주세요.'} maxLength={5000} value={text} onFocus={() => onBeginWriting?.()} onChange={event => setText(event.target.value)} onKeyDown={event => { if (!event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229 && !event.repeat && (event.metaKey || event.ctrlKey) && event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); void submit(); } }}/></label>
+    <div className="composer-category-row"><FeedbackCategoryChips value={kind === 'note' ? 'note' : category} disabled={busy || saving || recording || requestingMicrophone || uploading} onChange={value => { if (value === 'note') setKind('note'); else { setKind('request'); setCategory(value); } }}/></div>
+    <label className="composer-feedback-field"><SubmitTextarea rows={1} maxHeight={176} onSubmit={() => void submit()} onEscape={() => textareaRef.current?.blur()} aria-keyshortcuts="Enter" disabled={busy || saving} ref={textareaRef} aria-label={kind === 'note' ? '메모 내용' : '피드백 내용'} placeholder={PLACEHOLDERS[kind === 'note' ? 'note' : category]} maxLength={5000} value={text} onFocus={() => onBeginWriting?.()} onChange={event => setText(event.target.value)}/></label>
     <AttachmentGallery attachments={attachments} disabled={busy || saving || uploading || recording || requestingMicrophone || Boolean(pendingVoice)} onRemove={id => setAttachments(items => items.filter(item => item.id !== id))}/>
     {uploadingImage ? <div className="composer-upload-status" role="status"><LoaderCircle size={14} className="spinning"/>이미지를 첨부하고 있습니다…</div> : null}
-    {recording || requestingMicrophone ? <div className={`composer-voice-active${recording ? ' is-recording' : ''}`} role="status"><span>{recording ? <Mic size={14}/> : <LoaderCircle size={14} className="spinning"/>}{recording ? '녹음 중 · 시작한 시간과 그림 고정' : '마이크 권한을 확인하고 있습니다…'}</span>{recording ? <button type="button" onClick={() => void toggleRecording()} aria-label="녹음 종료"><Square size={12}/>녹음 종료</button> : null}</div> : null}
-    {pendingVoice ? <div className="composer-pending-voice" role={pendingVoice.status === 'failed' ? 'alert' : 'status'}><strong>{pendingVoice.status === 'uploading' ? '음성 피드백 저장 중…' : '녹음을 아직 저장하지 못했습니다.'}</strong><p>{pendingVoice.status === 'failed' ? `${pendingVoice.error} ` : ''}음성과 기준 장면을 이 화면에 보관하고 있습니다.{hasVoice ? ' 기존 음성 첨부도 유지됩니다.' : ''}</p><div><button type="button" className="secondary" disabled={busy || saving || uploading} onClick={() => void voiceUpload.current?.retry()}>다시 저장</button><button type="button" className="quiet" disabled={busy || saving || uploading} onClick={() => voiceUpload.current?.discard()}>이번 녹음 버리기</button></div></div> : hasVoice ? <p className="composer-voice-lock">음성의 시간·그림이 고정되어 있습니다. 바꾸려면 음성 첨부를 제거하세요.</p> : null}
+    {recording || requestingMicrophone ? <div className={`composer-voice-active${recording ? ' is-recording' : ''}`} role="status"><span>{recording ? <span className="composer-rec-dot" aria-hidden="true"/> : <LoaderCircle size={14} className="spinning"/>}{recording ? <>녹음 중 <strong className="composer-rec-time" aria-label={`녹음 ${duration(recordSeconds)}, 최대 ${duration(VOICE_MAX_SECONDS)}`}>{duration(recordSeconds)} / {duration(VOICE_MAX_SECONDS)}</strong> · 시작한 시간과 그림 고정</> : '마이크 권한을 확인하고 있습니다…'}</span>{recording ? <button type="button" onClick={() => void toggleRecording()} aria-label="녹음 종료"><Square size={12}/>녹음 종료</button> : null}</div> : null}
+    {pendingVoice ? <div className="composer-pending-voice" role={pendingVoice.status === 'failed' ? 'alert' : 'status'}><strong>{pendingVoice.status === 'uploading' ? '음성 피드백 저장 중…' : '음성을 아직 저장하지 못했습니다.'}</strong><p>{pendingVoice.status === 'failed' ? `${pendingVoice.error} ` : ''}음성과 기준 장면을 이 화면에 보관하고 있습니다.{hasVoice ? ' 기존 음성 첨부도 유지됩니다.' : ''}</p><div><button type="button" className="secondary" disabled={busy || saving || uploading} onClick={() => void voiceUpload.current?.retry()}>다시 저장</button><button type="button" className="quiet" disabled={busy || saving || uploading} onClick={() => voiceUpload.current?.discard()}>이번 음성 버리기</button></div></div> : hasVoice ? <p className="composer-voice-lock">음성의 시간·그림이 고정되어 있습니다. 바꾸려면 음성 첨부를 제거하세요.</p> : null}
     {!optionsOpen && activeOptions.length > 0 ? <div className="composer-option-summary" aria-label="설정된 추가 옵션">{activeOptions.map(option => <button key={option} type="button" onClick={() => setOptionsOpen(true)} title={option === '장면 설명' ? sceneDescription : '추가 옵션 열기'}>{option}</button>)}</div> : null}
     {optionsOpen ? <div id={optionsId} className="composer-options">
-      <div className="composer-kind" role="group" aria-label="저장할 내용 종류"><span>저장 방식</span><button type="button" aria-pressed={kind === 'request'} className={kind === 'request' ? 'active' : ''} disabled={busy || saving || recording || requestingMicrophone || uploading} onClick={() => setKind('request')}>피드백</button><button type="button" aria-pressed={kind === 'note'} className={kind === 'note' ? 'active' : ''} disabled={busy || saving || recording || requestingMicrophone || uploading} onClick={() => setKind('note')}>메모</button></div>
+      
       <label className="composer-scene-field"><span>장면 내용 <small>선택</small></span><input disabled={busy || saving} aria-label="장면 내용 (선택)" maxLength={500} value={sceneDescription} onFocus={() => onBeginWriting?.()} onChange={event => setSceneDescription(event.target.value)} placeholder="예: 제품을 들어 보이며 이름을 설명하는 장면" /></label>
-      <div className="composer-attachment-options"><div className="attachment-actions"><button type="button" className="composer-add-attachment" aria-label={editingMode ? '이미지 첨부' : '참고 이미지 추가'} disabled={busy || saving || uploading || recording || requestingMicrophone} onClick={() => inputRef.current?.click()}><Paperclip size={15}/>이미지</button><button type="button" className="composer-add-attachment" disabled={busy || saving || uploading || recording || requestingMicrophone || Boolean(pendingVoice)} aria-label="음성 피드백 녹음" onClick={() => void toggleRecording()}><Mic size={15}/>음성</button></div>{editingMode ? <label className="composer-attachment-role"><span>이미지 용도</span><select aria-label="첨부 이미지 역할" disabled={busy || saving || uploading || recording || requestingMicrophone} value={role} onChange={event => setRole(event.target.value)}><option value="reference">참고</option><option value="insert">영상에 삽입</option></select></label> : null}</div>
-      <div className="composer-input-hints"><span><strong className="composer-image-count" aria-live="polite">이미지 {imageCount}/{IMAGE_ATTACHMENT_LIMIT}</strong> · 음성 별도</span><span>이미지 끌어 놓기·붙여넣기 가능</span></div>
+      <div className="composer-attachment-options"><div className="attachment-actions"><button type="button" className="composer-add-attachment" aria-label={editingMode ? '이미지 첨부' : '참고 이미지 추가'} disabled={busy || saving || uploading || recording || requestingMicrophone} onClick={() => inputRef.current?.click()}><Paperclip size={15}/>이미지</button><button type="button" className="composer-add-attachment" disabled={busy || saving || uploading || recording || requestingMicrophone || Boolean(pendingVoice)} aria-label="음성 피드백 녹음" onClick={() => void toggleRecording()}><Mic size={15}/>녹음</button><button type="button" className="composer-add-attachment" disabled={busy || saving || uploading || recording || requestingMicrophone || Boolean(pendingVoice)} aria-label="음성 파일 첨부" onClick={() => voiceInputRef.current?.click()}><FileAudio size={15}/>음성 파일</button></div>{editingMode ? <label className="composer-attachment-role"><span>이미지 용도</span><select aria-label="첨부 이미지 역할" disabled={busy || saving || uploading || recording || requestingMicrophone} value={role} onChange={event => setRole(event.target.value)}><option value="reference">참고</option><option value="insert">영상에 삽입</option></select></label> : null}</div>
+      <div className="composer-input-hints"><span><strong className="composer-image-count" aria-live="polite">이미지 {imageCount}/{IMAGE_ATTACHMENT_LIMIT}</strong> · 음성 별도</span><span>이미지·음성 파일 끌어 놓기·붙여넣기 가능</span></div>
       {editingMode && kind === 'request' ? <label className="composer-interpret"><input type="checkbox" checked={interpretNow} disabled={busy || saving || recording || requestingMicrophone || uploading} onChange={event => setInterpretNow(event.target.checked)}/>저장 후 바로 해석</label> : null}
     </div> : null}
-    {sceneDescription.trim() && !hasContent && !pendingVoice && kind === 'request' ? <p className="composer-scene-only">피드백을 더 적거나, 추가 옵션에서 메모를 선택해 장면 내용만 저장하세요.</p> : null}
-    <div className="composer-actions"><button type="button" className={`composer-options-toggle${optionsOpen ? ' active' : ''}`} aria-expanded={optionsOpen} aria-controls={optionsId} onClick={() => setOptionsOpen(value => !value)}>{optionsOpen ? <ChevronUp size={14}/> : <Plus size={14}/>}추가 옵션</button><span className="composer-save-shortcut" title="⌘ 또는 Ctrl + Enter로 저장">⌘ / Ctrl ↵</span><button type="submit" className="primary" disabled={!canSubmit || busy || saving || uploading || recording || requestingMicrophone || Boolean(pendingVoice)}>{busy || saving || uploading ? <LoaderCircle size={15} className="spinning"/> : <Send size={15}/>} {kind === 'note' ? '메모 저장' : editingMode && interpretNow ? '저장하고 해석' : '피드백 저장'}</button></div>
+    {sceneDescription.trim() && !hasContent && !pendingVoice && kind === 'request' ? <p className="composer-scene-only">피드백을 더 적거나, 메모를 선택해 장면 내용만 저장하세요.</p> : null}
+    <div className="composer-actions"><button type="button" className={`composer-options-toggle${optionsOpen ? ' active' : ''}`} aria-expanded={optionsOpen} aria-controls={optionsId} onClick={() => setOptionsOpen(value => !value)}>{optionsOpen ? <ChevronUp size={14}/> : <Plus size={14}/>}추가 옵션</button><span className="composer-save-shortcut" title="Enter로 저장 · Shift + Enter로 줄바꿈 · Esc로 입력창 나가기"><kbd>Enter</kbd> 저장</span><button type="submit" className="primary" disabled={!canSubmit || busy || saving || uploading || recording || requestingMicrophone || Boolean(pendingVoice)}>{busy || saving || uploading ? <LoaderCircle size={15} className="spinning"/> : <Send size={15}/>} {kind === 'note' ? '메모 저장' : editingMode && interpretNow ? '저장하고 해석' : '피드백 저장'}</button></div>
   </form></div>;
 }

@@ -17,6 +17,7 @@ test('native filmstrip advertises exact frames, keeps distinct scenes and starts
   const colors = new Set();
   for (const cell of checks) colors.add((await sharp(cell.referencePath).extract({ left: 80, top: 45, width: 1, height: 1 }).raw().toBuffer()).toString('hex'));
   assert.equal(colors.size, 12, 'The fixture must distinguish all sampled frames; one repeated poster cannot pass.');
+  // Samples 15 frames apart share one decode run.
   assert.equal(result.cold.nativeCalls.length, 1); assert.equal(result.warm.nativeCalls.length, 0);
 });
 
@@ -29,7 +30,8 @@ test('long filmstrip skips its unused prefix while matching every original frame
   assert.equal(result.cold.result.frames[0], 75, 'first sample permits a whole-second prefix seek');
   const checks = await verifyFilmstripPixels({ strip: result.cold.result, videoPath: sourcePath, directory: join(directory, 'reference') });
   assert.equal(checks.length, 12);
-  assert.equal(result.cold.nativeCalls.length, 1); assert.equal(result.warm.nativeCalls.length, 0);
+  // 12 samples 150 frames apart: each run seeks next to its own sample instead of decoding the whole minute.
+  assert.equal(result.cold.nativeCalls.length, 12); assert.equal(result.warm.nativeCalls.length, 0);
 });
 
 test('native portrait filmstrip preserves aspect and black padding for every advertised sample', async t => {

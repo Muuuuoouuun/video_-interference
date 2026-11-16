@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, writeFile, copyFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
-import { spawn } from 'node:child_process';
+import { writeZip } from './zip.mjs';
 import sharp from 'sharp';
 import { projectComment } from '../../packages/core/comment-projection.mjs';
 import { groupDrawings, projectDrawings } from '../../packages/core/drawing-anchors.mjs';
@@ -104,15 +104,7 @@ Premiere에서 편집 가능한 벡터 도형으로 변환하지 않습니다.
 시퀀스를 다시 편집한 뒤에는 새 기준 영상으로 다시 검토하세요.
 실제 Premiere 호스트 검증은 아직 필요합니다.
 `);
-    const zip = (output, entries) => new Promise((resolve, reject) => {
-      const child = spawn('/usr/bin/zip', ['-q', output, '-@'], { cwd: work, stdio: ['pipe', 'ignore', 'pipe'] });
-      let stderr = '';
-      child.stderr.on('data', chunk => { stderr += chunk; });
-      child.on('error', reject);
-      child.stdin.on('error', reject);
-      child.on('close', code => code === 0 ? resolve() : reject(new Error(`연동 묶음을 만들지 못했습니다: ${stderr.slice(0, 500)}`)));
-      child.stdin.end(entries.join('\n') + '\n');
-    });
+    const zip = (output, entries) => writeZip(work, output, entries);
     await zip(archivePath, ['premiere-feedback.json', 'README.txt', ...pngs.map(item => item.file), ...timelinePngs.map(item => item.file)]);
     // Package the small offline panel separately; no build tool or npm install is needed by the recipient.
     const pluginFiles = ['manifest.json', 'index.html', 'main.js', 'bridge.js', 'overlays.js', 'sha256.js', 'style.css', 'README.md'];

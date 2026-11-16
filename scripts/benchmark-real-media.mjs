@@ -45,7 +45,7 @@ await mkdir(outputRoot, { recursive: true }); await mkdir(fixtureRoot, { recursi
 const nativeTiming = args.time === 'true', timingLog = join(outputRoot, 'native-time.jsonl');
 if (nativeTiming) {
   assert.equal(process.platform, 'darwin', '--time true uses the macOS /usr/bin/time -l format');
-  const wrapper = join(outputRoot, 'ffmpeg-timed-wrapper.mjs'), binary = process.env.FFMPEG_PATH || '/opt/homebrew/bin/ffmpeg';
+  const wrapper = join(outputRoot, 'ffmpeg-timed-wrapper.mjs'), binary = (await import('../apps/worker/engine.mjs')).ffmpegPath;
   await writeFile(timingLog, '');
   await writeFile(wrapper, `#!${process.execPath}\nimport {spawn} from 'node:child_process';\nimport {appendFileSync} from 'node:fs';\nlet stderr='';const started=Date.now();\nconst child=spawn('/usr/bin/time',['-l',${JSON.stringify(binary)},...process.argv.slice(2)],{stdio:['ignore','inherit','pipe']});\nchild.stderr.on('data',chunk=>{stderr+=chunk;process.stderr.write(chunk)});\nfor(const signal of ['SIGTERM','SIGINT'])process.on(signal,()=>child.kill(signal));\nchild.on('error',error=>{process.stderr.write(error.message);process.exitCode=1});\nchild.on('close',code=>{const cpu=stderr.match(/([\\d.]+)\\s+real\\s+([\\d.]+)\\s+user\\s+([\\d.]+)\\s+sys/);const rss=stderr.match(/(\\d+)\\s+maximum resident set size/);appendFileSync(${JSON.stringify(timingLog)},JSON.stringify({output:process.argv.at(-1),elapsedMs:Date.now()-started,realSeconds:cpu?Number(cpu[1]):null,userSeconds:cpu?Number(cpu[2]):null,systemSeconds:cpu?Number(cpu[3]):null,maximumResidentSetBytes:rss?Number(rss[1]):null,exitCode:code})+'\\n');process.exitCode=code===0?0:1});\n`);
   await chmod(wrapper, 0o755); process.env.FFMPEG_PATH = wrapper;
