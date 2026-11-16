@@ -3,9 +3,9 @@
 .vi-review-toolbar { display: flex; align-items: center; flex-wrap: nowrap; gap: 10px; min-width: 0; padding: 5px 0; overflow-x: auto; scrollbar-width: thin; container-type: inline-size; }
 .vi-directing-dock .vi-player-controls { flex: 0 0 auto; min-width: 0; padding: 0; border-bottom: 0; gap: 8px; flex-wrap: nowrap; }
 .vi-review-toolbar .vi-transport, .vi-review-toolbar .vi-player-tools { flex: 0 0 auto; gap: 5px; }
-.vi-review-toolbar .vi-play-button { width: 34px; height: 32px; border-radius: 5px; }
+.vi-review-toolbar .vi-play-button { width: 34px; height: 32px; border-radius: 6px; }
 .vi-review-toolbar .vi-timecode { font-size: 12px; gap: 3px; }
-.vi-review-toolbar .vi-timecode-error { position: static; min-width: 0; padding: 4px 6px; white-space: nowrap; font-size: 10px; }
+.vi-review-toolbar .vi-timecode-error { position: static; min-width: 0; padding: 4px 6px; white-space: nowrap; font-size: 11px; }
 .vi-review-toolbar .vi-playback-speed { padding: 0 5px; height: 32px; }
 .vi-review-toolbar .vi-playback-speed > span { display: none; }
 .vi-drawing-tools { flex: 1 0 auto; min-width: 0; }

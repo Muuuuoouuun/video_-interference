@@ -47,7 +47,7 @@ textarea:focus-visible, select:focus-visible,
 .outline-mint:hover:not(:disabled) { background: var(--accent-soft); border-color: var(--accent); }
 .quiet { color: var(--text-secondary); border-radius: 4px; }
 .quiet:hover:not(:disabled) { color: var(--text); background: var(--surface-muted); }
-.button-count { background: #fff3; color: inherit; border-radius: 3px; }
+.button-count { background: #fff3; color: inherit; border-radius: 4px; }
 
 /* The shell is quiet; the video, current time and selected comment lead. */
 .app-header, .version-rail, .request-rail, .status-bar, .asset-drawer { background: var(--surface); }
@@ -105,7 +105,7 @@ textarea:focus-visible, select:focus-visible,
 .vi-loop-button.active { color: var(--accent); background: var(--accent-soft); border-color: var(--accent-border); }
 .vi-loop-button.vi-marker-button.active { color: var(--warning); background: var(--warning-surface); border-color: #eedcae; }
 .vi-loop-button.vi-marker-button.active svg { fill: currentColor; }
-.vi-marker-count { min-width: 17px; padding: 1px 5px; border-radius: 9px; color: var(--warning); background: var(--warning-surface); font-size: 10px; font-weight: 600; font-variant-numeric: tabular-nums; text-align: center; }
+.vi-marker-count { min-width: 17px; padding: 1px 5px; border-radius: 9px; color: var(--warning); background: var(--warning-surface); font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; text-align: center; }
 .vi-marker-button.active .vi-marker-count { color: var(--surface); background: var(--warning); }
 .vi-loop-hint { color: var(--text-secondary); font-size: 11px; }
 .vi-tools-divider, .oe-toolbar-divider { background: var(--border-strong); }
@@ -125,7 +125,7 @@ textarea:focus-visible, select:focus-visible,
 .oe-style-details { border-color: var(--border); }
 .oe-style-details > summary { color: var(--text-secondary); font-size: 11px; }
 .oe-style-details > summary:hover, .oe-style-details[open] > summary { color: var(--accent); }
-.oe-style-details > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 3px; }
+.oe-style-details > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
 .oe-range-style input, .oe-fill-control input[type="checkbox"] { accent-color: var(--accent); }
 .oe-swatch { border-color: var(--surface); }
 .oe-swatch-active { outline-color: var(--text-secondary); }
@@ -227,7 +227,7 @@ textarea:focus-visible, select:focus-visible,
 .rq-edit-button:hover:not(:disabled) { color: var(--accent); background: #e9efff; border-color: var(--accent-border); }
 .rq-delete-button { color: var(--muted); }
 .rq-delete-button:hover:not(:disabled) { color: var(--danger); background: var(--danger-surface); border-color: #f0c9c5; }
-.rq-edited-label { color: var(--muted); background: #e9edf4; font-size: 10px; }
+.rq-edited-label { color: var(--muted); background: #e9edf4; font-size: 11px; }
 .rq-draft-summary { color: var(--accent); background: var(--accent-soft); border-color: var(--accent-border); border-radius: 6px; }
 .rq-draft-summary:hover:not(:disabled) { background: #e9efff; border-color: var(--accent); }
 .op-description { background: var(--surface-muted); color: var(--text-secondary); border-radius: 6px; font-size: 12px; }
@@ -250,7 +250,7 @@ textarea:focus-visible, select:focus-visible,
 .composer-select-range, .composer-drawing-context { color: var(--text-secondary); font-size: 11px; }
 .composer-options-toggle { color: var(--text-secondary); }
 .composer-options-toggle:hover, .composer-options-toggle.active { color: var(--accent); }
-.composer-save-shortcut { color: var(--muted); font-size: 10px; }
+.composer-save-shortcut { color: var(--muted); font-size: 11px; }
 .composer-options { border-color: var(--border); }
 .composer-options .composer-kind > span, .composer-attachment-role,
 .composer-voice-lock, .composer-upload-status { color: var(--muted); font-size: 11px; }
@@ -512,8 +512,8 @@ dialog[open]::backdrop { animation: vi-fade-in var(--motion-base) var(--ease-out
 .request-panel .request-item .rq-time-range > svg { display: none; }
 .request-panel .request-item .rq-current-version { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
 .request-panel .request-item .rq-current-version > .feedback-category-label { margin-left: 0; }
-.request-panel .request-item .rq-current-version .request-number { display: inline-flex; align-items: center; justify-content: center; min-width: 16px; width: auto; height: 16px; padding: 0 3px; border-width: 1px; border-style: solid; font-size: 9px; line-height: 1; }
-.request-panel .request-item .rq-version-label { color: var(--muted); font-size: 10px; }
+.request-panel .request-item .rq-current-version .request-number { display: inline-flex; align-items: center; justify-content: center; min-width: 16px; width: auto; height: 16px; padding: 0 3px; border-width: 1px; border-style: solid; font-size: 11px; line-height: 1; }
+.request-panel .request-item .rq-version-label { color: var(--muted); font-size: 11px; }
 .request-panel .request-item .request-text { margin-top: 0; margin-bottom: 4px; font-weight: 500; }
 .request-panel .request-item .rq-comment-actions { justify-content: flex-end; margin: 2px 0 0; gap: 2px; }
 .request-panel .request-item .rq-comment-actions .rq-supplement-toggle { margin-right: auto; padding: 2px 4px; font-size: 11px; }
@@ -540,8 +540,8 @@ dialog[open]::backdrop { animation: vi-fade-in var(--motion-base) var(--ease-out
 /* One-line shortcut bar and last-saved confirmation (2026-11-02) */
 .status-bar .status-shortcuts { display: flex; align-items: center; gap: 12px; min-width: 0; overflow: hidden; color: var(--muted); font-size: 11px; white-space: nowrap; }
 .status-bar .status-shortcuts > span { display: inline-flex; align-items: center; gap: 3px; padding-left: 0; border-left: 0; }
-.status-bar .status-shortcuts small { font-size: 10px; }
-.status-bar .status-shortcuts kbd { display: inline-flex; align-items: center; justify-content: center; min-width: 17px; height: 17px; padding: 0 4px; border: 1px solid var(--border-strong); border-radius: 3px; background: var(--surface-soft); color: var(--text-secondary); font: inherit; font-size: 10px; line-height: 1; }
+.status-bar .status-shortcuts small { font-size: 11px; }
+.status-bar .status-shortcuts kbd { display: inline-flex; align-items: center; justify-content: center; min-width: 17px; height: 17px; padding: 0 4px; border: 1px solid var(--border-strong); border-radius: 4px; background: var(--surface-soft); color: var(--text-secondary); font: inherit; font-size: 11px; line-height: 1; }
 @media (max-width: 1250px) { .status-bar .status-shortcuts > span:nth-child(n+4) { display: none; } }
 @media (max-width: 1000px) { .status-bar .status-shortcuts { display: none; } }
 .last-saved-note { color: var(--text-secondary); }
@@ -563,7 +563,7 @@ dialog[open]::backdrop { animation: vi-fade-in var(--motion-base) var(--ease-out
 }
 .vi-selection .vi-selection-actions { display: flex; align-items: center; gap: 6px; margin-left: auto; }
 .vi-selection .vi-compose-button { min-height: 28px; padding: 3px 9px; white-space: nowrap; }
-.vi-selection .vi-compose-button kbd { padding: 0 4px; border: 1px solid var(--accent-border); border-radius: 3px; background: var(--accent-soft); font: inherit; font-size: 11px; line-height: 1.5; }
+.vi-selection .vi-compose-button kbd { padding: 0 4px; border: 1px solid var(--accent-border); border-radius: 4px; background: var(--accent-soft); font: inherit; font-size: 11px; line-height: 1.5; }
 .vi-directing-dock[data-compact="false"] > .vi-timeline-area { padding-top: 2px; }
 .vi-workspace .vi-selection { padding: 5px 0; gap: 6px 10px; }
 .vi-selection .vi-time-field, .vi-selection .vi-point-time { min-height: 28px; }
@@ -579,7 +579,7 @@ dialog[open]::backdrop { animation: vi-fade-in var(--motion-base) var(--ease-out
    Text boxes start at the height of what they hold and grow with the text; Enter saves. */
 .composer .composer-feedback-field > textarea { min-height: 36px; max-height: 176px; resize: none; field-sizing: content; }
 .composer .composer-save-shortcut { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; }
-.composer .composer-save-shortcut kbd, .rq-editor-footer kbd { padding: 0 4px; border: 1px solid var(--border-strong); border-radius: 3px; color: var(--text-secondary); background: var(--surface-muted); font: inherit; font-size: 11px; line-height: 1.5; }
+.composer .composer-save-shortcut kbd, .rq-editor-footer kbd { padding: 0 4px; border: 1px solid var(--border-strong); border-radius: 4px; color: var(--text-secondary); background: var(--surface-muted); font: inherit; font-size: 11px; line-height: 1.5; }
 .rq-comment-editor textarea { min-height: 56px; max-height: 220px; resize: none; }
 .rq-comment-editor textarea.rq-scene-editor { min-height: 34px; max-height: 96px; }
 .rq-supplement-form textarea { min-height: 56px; max-height: 176px; resize: none; }
@@ -602,3 +602,64 @@ dialog[open]::backdrop { animation: vi-fade-in var(--motion-base) var(--ease-out
 .vi-directing-dock[data-compact="false"] > .vi-timeline-area { padding-top: 0; }
 .vi-details .vi-details-toggle { min-height: 26px; padding: 2px 10px; }
 .vi-directing-dock[data-compact="false"] > .vi-review-toolbar { padding: 3px 0; }
+
+/* Alignment and finish · 2026-11-16
+   One right edge for the rail, an 11px text floor, and controls that share height, border and radius. */
+@media (min-width: 901px) {
+  /* The list and the composer keep an 8px scrollbar lane inside the rail's padding, so their content
+     ends on the same line as the toolbar above them whether or not a scrollbar is showing. */
+  .request-rail .request-list, .request-rail .composer-wrap { scrollbar-gutter: stable; margin-right: -8px; padding-right: 0; }
+  @supports selector(::-webkit-scrollbar) {
+    .request-rail .request-list, .request-rail .composer-wrap { scrollbar-width: auto; scrollbar-color: auto; }
+    .request-rail .request-list::-webkit-scrollbar, .request-rail .composer-wrap::-webkit-scrollbar { width: 8px; }
+    .request-rail .request-list::-webkit-scrollbar-track, .request-rail .composer-wrap::-webkit-scrollbar-track { background: transparent; }
+    .request-rail .request-list::-webkit-scrollbar-thumb, .request-rail .composer-wrap::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: 4px; background: #c4cad4 content-box; }
+    .request-rail .request-list::-webkit-scrollbar-thumb:hover, .request-rail .composer-wrap::-webkit-scrollbar-thumb:hover { background-color: #9aa3b2; }
+  }
+  @supports not selector(::-webkit-scrollbar) {
+    .request-rail .request-list, .request-rail .composer-wrap { scrollbar-width: thin; scrollbar-color: #c4cad4 transparent; }
+  }
+}
+/* Numbered badge and category read at 11px; the badge grows to fit two or three digits. */
+.request-panel .request-item .rq-current-version .request-number { min-width: 18px; height: 18px; padding: 0 4px; }
+.request-panel .request-item .rq-scene-description + .request-text { margin-top: 8px; }
+/* The zoom label appears on hover or keyboard focus instead of covering every thumbnail. */
+@media (hover: hover) {
+  .attachment-thumbnail > span { opacity: 0; transition: opacity var(--motion-fast, 120ms) ease-out; }
+  .attachment-thumbnail:hover > span, .attachment-thumbnail:focus-visible > span { opacity: 1; }
+}
+/* Header menus read as one quiet group next to the bordered and primary actions. */
+.workspace-more > summary { min-height: 36px; padding: 0 10px; border: 1px solid transparent; font-size: 13px; user-select: none; }
+.workspace-more > summary:hover { color: var(--text); background: var(--surface-muted); }
+.workspace-more > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.workspace-more > div { min-width: 196px; padding: 6px; }
+.workspace-more > div > button { gap: 8px; min-height: 34px; padding: 0 10px; border-radius: 6px; font-size: 13px; text-align: left; }
+.workspace-more > div > button:hover:not(:disabled) { background: var(--surface-muted); }
+.workspace-more > div > button[aria-pressed="true"] { color: var(--accent); }
+/* The rail-mode select matches the other bordered controls in the player row. */
+.vi-review-toolbar .vi-rail-mode { border-color: var(--border-strong); border-radius: 6px; font-size: 12px; }
+/* Shortcut help fits one screen on a desktop: two balanced columns, groups never split. */
+@media (min-width: 1100px) {
+  .workspace-dialog.shortcuts-dialog { width: min(980px, calc(100vw - 64px)); max-width: none; }
+  .shortcuts-dialog .shortcut-groups { display: block; columns: 2; column-gap: 36px; padding-top: 14px; }
+  /* Spacing lives below each group: a margin above the first heading of a column would be dropped at the column break. */
+  .shortcuts-dialog .shortcut-groups > section { break-inside: avoid; margin: 0 0 16px; }
+  .shortcuts-dialog .shortcut-groups h3 { margin-top: 0; }
+  .shortcuts-dialog .shortcut-groups dl > div { padding: 5px 0; }
+}
+@media (min-width: 1360px) {
+  .workspace-dialog.shortcuts-dialog { width: min(1240px, calc(100vw - 64px)); }
+  .shortcuts-dialog .shortcut-groups { columns: 3; }
+}
+/* Reviewing feedback that has drawings: scene chips, counts and the one-line hint share a single row in the dock. */
+.vi-directing-dock[data-compact="false"] .oe-readonly-context { flex-wrap: nowrap; align-items: center; padding-bottom: 1px; }
+.vi-directing-dock[data-compact="false"] .oe-readonly-context > .oe-frame-context { display: flex; align-items: center; gap: 10px; flex: 1 1 auto; }
+.vi-directing-dock[data-compact="false"] .oe-readonly-context .oe-frame-scenes { order: -1; flex: 0 1 auto; min-width: 0; padding: 0; }
+.vi-directing-dock[data-compact="false"] .oe-readonly-context .oe-frame-scene { padding: 0 6px; line-height: 15px; }
+.vi-directing-dock[data-compact="false"] .oe-readonly-context .oe-frame-summary { flex: 0 0 auto; flex-wrap: nowrap; white-space: nowrap; }
+.vi-directing-dock[data-compact="false"] .oe-readonly-context > .oe-editor-status { flex: 0 1 auto; justify-content: flex-end; }
+.vi-directing-dock[data-compact="false"] .oe-readonly-context > .oe-editor-status > span:first-child { display: none; }
+.vi-directing-dock[data-compact="false"] .oe-readonly-context > .oe-editor-status > span:last-child { display: block; overflow: hidden; text-overflow: ellipsis; }
+/* Start screen header: wordmark left, one action group right. */
+.video-start-header-actions { display: flex; align-items: center; gap: 14px; }
+.video-start-header .video-start-private { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; white-space: nowrap; }
