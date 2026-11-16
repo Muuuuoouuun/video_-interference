@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { memo, useEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from 'react';
 import { Check, Clock3, Brackets, FileText, MessageSquare, SlidersHorizontal, Type, Volume2, X, Image, Scissors, RotateCcw, PencilLine, LoaderCircle, Trash2, Plus, ChevronUp, ChevronDown, Search, LayoutList, StickyNote, ArrowDownWideNarrow } from 'lucide-react';
 import type { Attachment, Comment, EditOp, Region, Version, FeedbackCategory } from '../../../../packages/core/types';
 import { projectComment } from '../../../../packages/core/comment-projection.mjs';
@@ -8,6 +8,7 @@ import { projectDrawings } from '../../../../packages/core/drawing-anchors.mjs';
 import { time, duration } from '../format';
 import { AttachmentGallery } from './AttachmentGallery';
 import { SubmitTextarea } from './SubmitTextarea';
+import { useShallowStable, useStableHandlers } from './useStable';
 import { feedbackCategory, FEEDBACK_CATEGORY_LABELS } from '../../../../packages/core/feedback-category.mjs';
 import { FeedbackCategorySelect } from './FeedbackCategory';
 import './RequestPanel.css';
@@ -20,6 +21,30 @@ interface Props { headerActions?: ReactNode; keyboardEnabled?: boolean; editingM
 
 interface CommentDraft { text: string; sceneDescription: string; originalText: string; originalSceneDescription: string; category: FeedbackCategory; originalCategory: FeedbackCategory }
 function isChangedDraft(draft: CommentDraft) { return draft.text !== draft.originalText || draft.sceneDescription !== draft.originalSceneDescription || draft.category !== draft.originalCategory; }
+
+type CommentProjection = ReturnType<typeof projectComment>;
+type Setter<T> = Dispatch<SetStateAction<T>>;
+/** Everything a card reads besides its own comment and selection. Event handlers here have a fixed identity. */
+interface CardShared {
+  opsByComment: Map<string, EditOp[]>; versionsById: Map<string, Version>; projections: Map<string, CommentProjection>;
+  drawingStates: Map<string, { scenes: number; deleted: number; unavailable: number }>; bundleRevisions: Map<string, string>;
+  numberById: Map<string, number>; attachmentsByComment: Map<string, Attachment[]>;
+  contextBundles: Record<string, { revision: string; result: PreparedContextBundle }>;
+  commentDrafts: Record<string, CommentDraft>; supplementDrafts: Record<string, string>;
+  versions: Version[]; currentVersion: Version; editingMode: boolean; busy: boolean;
+  savingSupplementId: string | null; savingCommentId: string | null; deletingCommentId: string | null; editingCommentId: string | null;
+  failedCommentId: string | null; failedSupplementId: string | null; supplementing: string | null; preparingBundleId: string | null;
+  editing: string | null; editValue: string; positioning: string | null; previewOpId?: string | null; transcribingId?: string | null;
+  setSupplementing: Setter<string | null>; setFailedSupplementId: Setter<string | null>; setResumeSupplementId: Setter<string | null>;
+  setCommentDrafts: Setter<Record<string, CommentDraft>>; setFailedCommentId: Setter<string | null>; setEditValue: Setter<string>;
+  setPositioning: Setter<string | null>; setSupplementDrafts: Setter<Record<string, string>>;
+  selectFromList: (comment: Comment) => void; startCommentEdit: (comment: Comment) => void; deleteComment: (comment: Comment) => Promise<void>;
+  saveCommentEdit: (comment: Comment) => Promise<void>; cancelCommentEdit: (id: string) => void; onSelectAuthored: (comment: Comment) => void;
+  saveEdit: (op: EditOp) => Promise<void>; startEdit: (op: EditOp) => void; onOp: (id: string, patch: Record<string, unknown>) => Promise<boolean>;
+  onPreviewOverlay: (id: string) => void; operationBlocked: (op: EditOp) => boolean; prepareContext: (comment: Comment) => Promise<void>;
+  onInterpret: (id: string) => Promise<void>; saveSupplement: (comment: Comment, applied: boolean) => Promise<void>; cancelSupplement: (id: string) => void;
+  onTranscribe?: (id: string) => Promise<void>;
+}
 
 function rangeLabel(frameIn: number, frameOut: number) { return frameOut - frameIn === 1 ? time(frameIn) : `${time(frameIn)} – ${time(frameOut)}`; }
 
@@ -88,7 +113,9 @@ export const RequestPanel = memo(function RequestPanel({ headerActions, keyboard
     if (!resumeCommentId || editingCommentId !== resumeCommentId || filter !== 'all' || searchQuery) return;
     const raf = requestAnimationFrame(() => {
       const textarea = document.getElementById(`comment-text-${resumeCommentId}`);
-      textarea?.scrollIntoView({ block: 'nearest' });
+      // Show the whole editor with its save row; the focused field wins when the list is shorter than the editor.
+      textarea?.closest('.rq-comment-editor')?.scrollIntoView({ block: 'nearest', behavior: 'instant' });
+      textarea?.scrollIntoView({ block: 'nearest', behavior: 'instant' });
       textarea?.focus({ preventScroll: true });
       setResumeCommentId(null);
     });
@@ -157,7 +184,8 @@ export const RequestPanel = memo(function RequestPanel({ headerActions, keyboard
     selectFromList(comment);
     requestAnimationFrame(() => {
       const card = document.getElementById(`request-${comment.id}`);
-      card?.scrollIntoView({ block: 'nearest' });
+      // Stepping must land at once; the list's smooth scrolling is for pointer use.
+      card?.scrollIntoView({ block: 'nearest', behavior: 'instant' });
       // Stepping from the player keeps focus there, so Space still plays and C still writes.
       if (focusCard) card?.querySelector<HTMLButtonElement>('.request-location')?.focus({ preventScroll: true });
     });
@@ -283,6 +311,13 @@ export const RequestPanel = memo(function RequestPanel({ headerActions, keyboard
     } catch { setFailedSupplementId(comment.id); }
     finally { supplementInFlight.current = false; setSavingSupplementId(null); }
   }
+  const cardHandlers = useStableHandlers({ selectFromList, startCommentEdit, deleteComment, saveCommentEdit, cancelCommentEdit, onSelectAuthored, saveEdit, startEdit, onOp, onPreviewOverlay, operationBlocked, prepareContext, onInterpret, saveSupplement, cancelSupplement, onTranscribe });
+  // Everything a card reads, except the selection: the object keeps its identity until one of these values changes.
+  const cardShared = useShallowStable<CardShared>({
+    opsByComment, editingMode, busy, savingSupplementId, savingCommentId, deletingCommentId, commentDrafts, editingCommentId, supplementDrafts, versionsById, projections, drawingStates, contextBundles, bundleRevisions, currentVersion, numberById, supplementing, versions, failedCommentId, attachmentsByComment, transcribingId, editing, editValue, previewOpId, positioning, preparingBundleId, failedSupplementId,
+    setSupplementing, setFailedSupplementId, setResumeSupplementId, setCommentDrafts, setFailedCommentId, setEditValue, setPositioning, setSupplementDrafts,
+    ...cardHandlers, onTranscribe: onTranscribe ? cardHandlers.onTranscribe : undefined,
+  });
   return <section ref={panelRef} className="request-panel" aria-label="시간별 피드백 목록">
     <div className="rq-list-toolbar">
     <div className="panel-heading rq-panel-heading"><div className="rq-heading-title"><h1>{editingMode ? '편집 요청' : '댓글'}</h1><span className="subtle">{comments.length}</span></div>{headerActions ? <div className="rq-header-actions">{headerActions}</div> : null}</div>
@@ -298,113 +333,122 @@ export const RequestPanel = memo(function RequestPanel({ headerActions, keyboard
     {searchQuery.trim() || filter !== 'all' ? <div className="rq-results-summary" role="status"><span>{visible.length}개 표시 · 전체 {comments.length}개</span><button type="button" onClick={resetListFilters}>전체 보기</button></div> : null}
     </div>
     <div className="request-list">
-      {visible.length === 0 ? <div className="empty-requests"><MessageSquare size={24}/><p>{comments.length === 0 ? '아직 피드백이 없습니다.' : searchQuery.trim() ? '검색에 맞는 피드백이 없습니다.' : '이 분류의 피드백이 없습니다.'}</p>{searchQuery || filter !== 'all' ? <button type="button" className="outline-mint" onClick={resetListFilters}>검색·필터 초기화</button> : null}</div> : visible.map(comment => {
-        const related = opsByComment.get(comment.id) ?? [];
-        const supplements = comment.supplements ?? [];
-        const isNote = comment.kind === 'note';
-        const isLayerChange = Boolean(comment.layerChange);
-        const hasApplied = comment.status === 'applied' || related.some(op => op.status === 'applied');
-        const hasApproved = comment.status === 'approved' || related.some(op => op.status === 'approved');
-        const needsClarification = Boolean(comment.clarification) || related.some(op => op.status === 'needs_clarification');
-        const showInterpret = editingMode && !isNote && !isLayerChange && (related.length === 0 || needsClarification || supplements.length > 0);
-        const supplementBusy = busy || savingSupplementId !== null || savingCommentId !== null || deletingCommentId !== null;
-        const commentDraft = commentDrafts[comment.id];
-        const unsavedEdit = Boolean(commentDraft && isChangedDraft(commentDraft));
-        const commentEditorOpen = editingCommentId === comment.id && Boolean(commentDraft);
-        const canSaveEdit = unsavedEdit && Boolean(commentDraft.text.trim() || comment.voiceAssetId || comment.drawings.length || comment.attachmentIds.length || isNote && commentDraft.sceneDescription.trim());
-        const unsavedSupplement = Boolean(supplementDrafts[comment.id]?.trim());
-        const opBusy = supplementBusy || unsavedEdit || unsavedSupplement;
-        const authored = versionsById.get(comment.versionId);
-        const projection = projections.get(comment.id)!;
-        const drawingState = drawingStates.get(comment.id)!;
-        const prepared = contextBundles[comment.id];
-        const bundle = prepared?.revision === bundleRevisions.get(comment.id) ? prepared.result : undefined;
-        const differentVersion = comment.versionId !== currentVersion.id;
-        const mappedLabel = projection.status === 'deleted' ? '현재 버전에서 삭제된 구간' : projection.status === 'unavailable' ? '현재 버전에서 위치 확인 불가' : projection.ranges.map(range => rangeLabel(range.frameIn, range.frameOut)).join(', ');
-        const index = numberById.get(comment.id)!;
-        const showAuthoredPosition = differentVersion || !authored || projection.status !== 'present';
-        const supplementButton = !isLayerChange ? <button type="button" id={`supplement-feedback-${comment.id}`} className="quiet rq-supplement-toggle" aria-label={isNote ? '메모 추가' : '추가 지시'} disabled={supplementBusy || hasApplied} aria-expanded={supplementing === comment.id} aria-controls={supplementing === comment.id ? `supplement-form-${comment.id}` : undefined} onClick={() => { setSupplementing(comment.id); setFailedSupplementId(null); setResumeSupplementId(comment.id); }} title={hasApplied ? '이미 적용된 요청입니다. 새 요청을 남겨 주세요.' : isNote ? '원문을 유지하고 메모를 덧붙입니다.' : '원문을 유지하고 편집 지시를 덧붙입니다.'}><Plus size={14}/><span className="rq-action-text">{isNote ? '메모 추가' : '추가 지시'}</span></button> : null;
-        const cardActions = <div className="rq-card-actions" role="group" aria-label={`피드백 ${index} 관리`}>
-            <button type="button" id={`edit-feedback-${comment.id}`} className="rq-card-action rq-edit-button" disabled={supplementBusy || hasApplied || isLayerChange || commentEditorOpen} onClick={() => startCommentEdit(comment)} aria-label={`피드백 ${index} 수정`} aria-keyshortcuts="F2" title={hasApplied || isLayerChange ? '이미 적용된 요청과 그래픽 변경은 새 피드백으로 남겨 주세요.' : '수정 · F2 또는 본문 두 번 클릭'}><PencilLine size={15} aria-hidden="true"/></button>
-            <button type="button" id={`delete-feedback-${comment.id}`} className="rq-card-action rq-delete-button" disabled={supplementBusy || unsavedEdit || unsavedSupplement} onClick={() => void deleteComment(comment)} aria-label={`피드백 ${index} 삭제`} aria-keyshortcuts="Shift+Delete" aria-busy={deletingCommentId === comment.id} title={unsavedEdit || unsavedSupplement ? '작성 중인 내용을 먼저 저장하거나 취소하세요.' : '삭제 · Shift + Delete · 삭제 후 되돌릴 수 있습니다.'}>{deletingCommentId === comment.id ? <LoaderCircle size={15} className="spinning" aria-hidden="true"/> : <Trash2 size={15} aria-hidden="true"/>}</button>
-          </div>;
-        return <article key={comment.id} id={`request-${comment.id}`} data-feedback-id={comment.id} data-feedback-category={feedbackCategory(comment)} className={`request-item ${selectedId === comment.id ? 'selected' : ''}`} tabIndex={0} aria-label={`피드백 ${index}`} onFocus={event => { if (event.target === event.currentTarget && !supplementBusy) selectFromList(comment); }}>
-          <div className="rq-card-heading">
-          <button id={`locate-feedback-${comment.id}`} className="request-location rq-projected-location" disabled={supplementBusy} onClick={() => selectFromList(comment)} aria-label={`요청 ${index}, 현재 버전 v${currentVersion.number}, ${mappedLabel}`}>
-            <span className="rq-location-content">
-              {projection.status === 'deleted' || projection.status === 'unavailable' ? <span className={`rq-projection-message ${projection.status}`}>{mappedLabel}</span> : <span className="rq-projected-ranges">{projection.ranges.map((range, rangeIndex) => {
-                const isPoint = range.frameOut - range.frameIn === 1;
-                return <span className="rq-time-range" key={rangeIndex} title={isPoint ? '피드백 시점' : '피드백 구간 · 끝 시점은 포함하지 않음'}>{isPoint ? <Clock3 size={13} aria-hidden="true"/> : <Brackets size={13} aria-hidden="true"/>}<span className="rq-time-value">{time(range.frameIn)}</span>{!isPoint ? <><span className="rq-time-separator" aria-hidden="true">–</span><span className="rq-time-value">{time(range.frameOut)}</span></> : null}</span>;
-              })}</span>}
-              <span className="rq-current-version"><span className={`request-number ${related.some(op => op.status === 'approved' || op.status === 'applied') ? 'approved' : ''}`}>{index}</span>{versions.length > 1 ? <span className="rq-version-label">v{currentVersion.number}</span> : null}<span className="feedback-category-label"><span className="feedback-category-dot" aria-hidden="true"/>{FEEDBACK_CATEGORY_LABELS[feedbackCategory(comment)]}</span></span>
-            </span>
-          </button>
-          <div className="rq-card-side-actions">{!editingMode ? supplementButton : null}{cardActions}</div>
-          </div>
-          {showAuthoredPosition || comment.updatedAt ? <div className="rq-authored-position">{showAuthoredPosition ? <span>{authored ? `작성 v${authored.number}` : '작성 버전 정보 없음'} · {rangeLabel(comment.frameIn, comment.frameOut)}</span> : null}{comment.updatedAt ? <span className="rq-edited-label" title={supplementTime(comment.updatedAt)}>수정됨</span> : null}{differentVersion ? <button className="quiet" disabled={supplementBusy || !authored} onClick={() => onSelectAuthored(comment)} title={!authored ? '작성 버전 정보를 찾을 수 없습니다.' : '요청을 작성한 버전과 원래 프레임을 엽니다.'}>{authored ? `작성 v${authored.number} 보기` : '작성 버전 보기'}</button> : null}</div> : null}
-          {projection.status === 'partial' ? <p className="rq-projection-note">현재 버전에 표시할 수 있는 일부 구간만 보입니다.</p> : null}
-          {projection.contextStatus === 'deleted' ? <p className="rq-projection-note">요청을 남긴 기준 장면은 삭제됨</p> : null}
-          {comment.drawings.length > 0 ? <p className="rq-projection-note">그림 {comment.drawings.length}개 · 현재 {drawingState.scenes}개 장면{drawingState.deleted ? ` · 삭제된 장면의 그림 ${drawingState.deleted}개` : ''}{drawingState.unavailable ? ` · 위치 확인 불가 ${drawingState.unavailable}개` : ''}</p> : null}
-          {editingMode && !isNote ? <p className="rq-authored-target">{isLayerChange ? '수정·제거 승인은' : '해석·승인은'} {authored ? `작성 v${authored.number}` : '작성 버전'} 기준입니다.{differentVersion && authored ? ' 실행하려면 해당 버전을 여세요.' : ''}</p> : null}
-          {comment.kind === 'note' ? <span className="request-kind-note"><FileText size={12}/>보관된 메모</span> : null}
-          {!commentEditorOpen && comment.sceneDescription ? <div className="rq-scene-description"><span>장면 내용 · 직접 작성</span><p>{comment.sceneDescription}</p></div> : null}
-          {!commentEditorOpen ? <p className="request-text" onDoubleClick={() => startCommentEdit(comment)} title={hasApplied || isLayerChange ? undefined : '두 번 클릭해서 수정'}>{comment.text || (comment.voiceAssetId ? '음성 지시가 저장되었습니다.' : comment.attachmentIds.length ? '첨부 자료가 저장되었습니다.' : comment.sceneDescription ? '장면 기록' : '그림으로 남긴 피드백')}</p> : <form className="rq-comment-editor" aria-label="저장된 피드백 수정" onSubmit={event => { event.preventDefault(); void saveCommentEdit(comment); }} onKeyDown={event => { if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return; if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); cancelCommentEdit(comment.id); } }}>
-            <div className="rq-editor-heading"><PencilLine size={14}/><strong>피드백 수정</strong><span>시간·그림 유지</span></div>
-            {!isNote ? <FeedbackCategorySelect value={commentDraft.category} label="수정할 피드백 분야" disabled={supplementBusy} onChange={value => { if (value !== 'note') setCommentDrafts(drafts => ({ ...drafts, [comment.id]: { ...drafts[comment.id], category: value } })); }}/> : null}
-            <label htmlFor={`comment-scene-${comment.id}`}>장면 내용 <span>선택</span></label>
-            <SubmitTextarea rows={1} maxHeight={96} onSubmit={() => { if (canSaveEdit) void saveCommentEdit(comment); }} id={`comment-scene-${comment.id}`} className="rq-scene-editor" value={commentDraft.sceneDescription} maxLength={500} disabled={supplementBusy} placeholder="이때 영상에 어떤 내용이 나오나요?" onChange={event => { const sceneDescription = event.target.value; setCommentDrafts(drafts => ({ ...drafts, [comment.id]: { ...drafts[comment.id], sceneDescription } })); setFailedCommentId(null); }}/>
-            <label htmlFor={`comment-text-${comment.id}`}>{isNote ? '메모 내용' : '편집 피드백'}</label>
-            <SubmitTextarea rows={2} maxHeight={220} onSubmit={() => { if (canSaveEdit) void saveCommentEdit(comment); }} aria-keyshortcuts="Enter" id={`comment-text-${comment.id}`} value={commentDraft.text} maxLength={5000} disabled={supplementBusy} placeholder="어떤 부분을 어떻게 바꿀까요?" onChange={event => { const text = event.target.value; setCommentDrafts(drafts => ({ ...drafts, [comment.id]: { ...drafts[comment.id], text } })); setFailedCommentId(null); }}/>
-            {related.length > 0 && (commentDraft.text !== commentDraft.originalText || commentDraft.sceneDescription !== commentDraft.originalSceneDescription) ? <p className="rq-supplement-approval">수정하면 기존 해석과 승인을 해제합니다.</p> : null}
-            {failedCommentId === comment.id ? <p className="rq-supplement-error" role="alert">저장하지 못했습니다. 수정한 내용은 유지됩니다.</p> : null}
-            <div className="rq-editor-footer"><span><kbd>Enter</kbd> 저장 · <kbd>Shift</kbd>+<kbd>Enter</kbd> 줄바꿈 · <kbd>Esc</kbd> 취소</span><div><button type="button" className="quiet" disabled={supplementBusy} onClick={() => cancelCommentEdit(comment.id)}>취소</button><button type="submit" className="outline-mint" disabled={supplementBusy || !canSaveEdit}>{savingCommentId === comment.id ? <LoaderCircle size={13} className="spinning"/> : <Check size={13}/>}수정 저장</button></div></div>
-          </form>}
-          {supplements.length > 0 ? <ol className="rq-supplement-history" aria-label={isNote ? '메모 보완 기록' : '추가 지시 기록'}>{supplements.map((supplement, supplementIndex) => <li key={supplement.id}><div><span>{isNote ? '메모 보완' : '추가 지시'} {supplementIndex + 1}</span><time dateTime={supplement.createdAt}>{supplementTime(supplement.createdAt)}</time></div><p>{supplement.text}</p></li>)}</ol> : null}
-          <AttachmentGallery compact disabled={busy} onTranscribe={onTranscribe} transcribingId={transcribingId} attachments={attachmentsByComment.get(comment.id)!}/>
-          {comment.clarification ? <p className="clarification">{comment.clarification}</p> : null}
-          {(editingMode || isLayerChange ? related : []).map(op => {
-            const Icon = icons[op.type];
-            const removing = op.layerChange?.action === 'remove';
-            const operationLabel = op.layerChange ? `${op.type === 'subtitle' ? '자막' : '그래픽'} ${removing ? '제거' : '수정'}` : labels[op.type];
-            const canEdit = editingMode && !removing && (['speed','subtitle','audio'].includes(op.type) || op.type === 'overlay' && op.params.kind === 'text') && op.status !== 'applied';
-            const canPosition = editingMode && !removing && op.type === 'overlay' && op.params.kind !== 'drawing' && op.status !== 'applied' && op.status !== 'needs_clarification';
-            const status = op.type === 'note' ? '보관된 메모' : op.status === 'applied' ? '적용됨' : op.status === 'approved' ? '승인됨' : op.status === 'rejected' ? '제외됨' : op.status === 'needs_clarification' ? '보완 필요' : '승인 대기';
-            return <div key={op.id} className={`op-area ${op.status === 'rejected' ? 'rejected' : ''}`}>
-              <div className="op-description"><Icon size={17}/><span>{operationLabel}{op.type === 'speed' ? ` ${op.params.factor}× · ${duration(op.frameOut-op.frameIn)} → ${duration((op.frameOut-op.frameIn)/(op.params.factor || 1))}` : op.type === 'subtitle' && !removing ? ` · ${duration(op.frameOut-op.frameIn)}` : ''}</span></div>
-              {op.type === 'speed' ? <small className="op-detail">원본 속도 기준</small> : null}
-              {removing ? <small className="op-detail">다음 버전에서 이 그래픽 제거 · 이전 버전 유지</small> : null}
-              {op.interpreter === 'manual' ? <small className="op-detail">직접 지정한 변경 · 기존 적용 구간 유지</small> : null}
-              {!removing && op.type === 'subtitle' ? <small className="op-detail">“{op.params.text}”</small> : null}
-              {!removing && op.type === 'overlay' ? <small className="op-detail">{op.params.kind === 'drawing' ? `그림·도형 ${op.params.drawings?.length ?? 0}개 · 지정 구간에 표시` : op.params.kind === 'image' ? '삽입 이미지 · 원본 비율 유지' : op.params.kind === 'box' ? '도형 표시' : `“${op.params.text}”`}</small> : null}
-              {editingMode && editing === op.id ? <form className="op-editor" onSubmit={e => { e.preventDefault(); void saveEdit(op); }}><input disabled={opBusy} aria-label={`${operationLabel} 값 수정`} type={op.type === 'subtitle' || op.type === 'overlay' ? 'text' : 'number'} min={op.type === 'speed' ? 0.25 : 0} max={op.type === 'speed' ? 4 : 2} step="any" value={editValue} onChange={e => setEditValue(e.target.value)}/><button disabled={opBusy} className="outline-mint">저장</button></form> : <div className="op-actions"><span className={`op-status ${op.status}`}>{op.status === 'applied' || op.status === 'approved' ? <Check size={13}/> : null}{status}</span>
-                {canEdit ? <button className="quiet" disabled={opBusy} onClick={() => startEdit(op)} aria-label={`${operationLabel} 값 수정`}><SlidersHorizontal size={14}/>수정</button> : null}
-                {editingMode && op.type !== 'note' && op.status === 'proposed' ? <button disabled={opBusy} className="outline-mint" onClick={() => void onOp(op.id, { status: 'approved' })}>승인</button> : null}
-                {editingMode && op.status === 'approved' ? <button className="quiet" disabled={opBusy} onClick={() => void onOp(op.id, { status: 'proposed' })} aria-label="승인 취소"><RotateCcw size={14}/></button> : null}
-                {editingMode && op.status === 'proposed' ? <button className="quiet icon" disabled={opBusy} onClick={() => void onOp(op.id, { status: 'rejected' })} aria-label="요청 제외"><X size={14}/></button> : null}
-              </div>}
-              {canPosition ? <div className="overlay-placement-actions"><button className={`quiet ${previewOpId === op.id ? 'mint-text' : ''}`} disabled={opBusy} onClick={() => { setPositioning(positioning === op.id ? null : op.id); if (op.params.kind === 'image' && !op.layerChange) onPreviewOverlay?.(op.id); }}><SlidersHorizontal size={14}/>위치·크기</button>{previewOpId === op.id ? <small>영상 위에서 조절 중</small> : null}</div> : null}
-              {canPosition && positioning === op.id ? <RegionEditor key={JSON.stringify(op.region)} op={op} busy={opBusy} onSave={region => operationBlocked(op) ? Promise.resolve(false) : onOp(op.id, { region, status: 'proposed' })}/> : null}
-            </div>;
-          })}
-          {editingMode && related.length > 0 && (unsavedEdit || unsavedSupplement) ? <p className="rq-comment-guidance">피드백 수정을 먼저 저장하거나 취소한 뒤 편집 명령을 변경하세요.</p> : null}
-          {editingMode ? <div className="rq-comment-actions">{supplementButton}
-            {editingMode ? <button className="quiet" disabled={supplementBusy || unsavedSupplement || unsavedEdit || preparingBundleId !== null || !authored} onClick={() => void prepareContext(comment)} title={unsavedSupplement || unsavedEdit ? '작성 중인 내용을 먼저 저장한 뒤 자료를 준비하세요.' : '저장된 요청·그림·관련 장면·첨부를 이 PC에서 자료로 준비합니다. 외부 AI에 전송하지 않습니다.'}>{preparingBundleId === comment.id ? <LoaderCircle size={13} className="spinning"/> : <FileText size={13}/>}AI용 자료 준비</button> : null}
-            {showInterpret ? <button className="outline-mint" disabled={supplementBusy || unsavedSupplement || unsavedEdit || hasApproved || hasApplied} onClick={() => void onInterpret(comment.id)} title={unsavedSupplement || unsavedEdit ? '작성 중인 내용을 먼저 저장한 뒤 해석하세요.' : hasApplied ? '적용된 요청은 다시 해석할 수 없습니다. 새 요청을 남겨 주세요.' : hasApproved ? '기존 승인을 취소하거나 지시를 보완한 뒤 해석하세요.' : '원문과 추가 지시를 함께 해석합니다.'}>요청 해석</button> : null}
-          </div> : null}
-          {editingMode && bundle ? <div className="rq-context-bundle" role="status"><p>로컬 자료 준비됨 · 영상 {bundle.sceneCount}장 · 첨부 {bundle.attachmentCount}개</p><div>{bundle.archiveUrl ? <a className="quiet" href={bundle.archiveUrl} download>자료 묶음 받기</a> : null}<a className="quiet" href={bundle.manifestUrl} target="_blank" rel="noreferrer">자료 목록</a><span>외부 전송 없음</span></div></div> : null}
-          {hasApplied ? <p className="rq-comment-guidance">{editingMode && related.some(op => op.type === 'overlay' || op.type === 'subtitle') ? '자막·그래픽 변경은 현재 버전의 ‘적용된 자막·그래픽’에서 요청하세요.' : '이미 적용된 요청입니다. 변경하려면 새 요청을 남겨 주세요.'}</p> : showInterpret && hasApproved ? <p className="rq-comment-guidance">승인된 명령이 있습니다. 승인을 취소하거나 지시를 보완한 뒤 다시 해석하세요.</p> : editingMode && supplements.length > 0 && !isNote && (comment.status === 'received' || related.length === 0) ? <p className="rq-comment-guidance">추가 지시가 저장되었습니다. 요청 해석을 눌러 편집 명령을 준비하세요.</p> : null}
-          {!isLayerChange && supplementing === comment.id ? <form id={`supplement-form-${comment.id}`} className="rq-supplement-form" onSubmit={event => { event.preventDefault(); void saveSupplement(comment, hasApplied); }}>
-            <label htmlFor={`supplement-${comment.id}`}>{isNote ? '메모 보완' : '피드백 보완'}</label>
-            <SubmitTextarea rows={2} maxHeight={176} onSubmit={() => void saveSupplement(comment, hasApplied)} aria-keyshortcuts="Enter" id={`supplement-${comment.id}`} aria-label={isNote ? '메모 보완 내용' : '추가 편집 지시 내용'} value={supplementDrafts[comment.id] ?? ''} maxLength={5000} disabled={supplementBusy || hasApplied} placeholder={isNote ? '기존 메모에 덧붙일 내용을 입력하세요.' : '어떤 부분을 어떻게 바꿀지 더 알려주세요.'} onChange={event => { const value = event.target.value; setSupplementDrafts(drafts => ({ ...drafts, [comment.id]: value })); setFailedSupplementId(null); }} onKeyDown={event => { if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return; if (event.key === 'Escape' && !supplementBusy) { event.preventDefault(); event.stopPropagation(); cancelSupplement(comment.id); } }} />
-            {hasApproved ? <p className="rq-supplement-approval">추가 지시를 저장하면 이전 승인이 해제됩니다.</p> : null}
-            {!hasApplied ? <p className="rq-supplement-help">{isNote ? '원문을 유지하고 보완 기록으로 저장합니다.' : editingMode ? '원문을 유지합니다. 저장 후 요청 해석을 눌러 주세요.' : '원문과 보완 내용을 함께 전달 자료에 담습니다.'}</p> : null}
-            {failedSupplementId === comment.id ? <p className="rq-supplement-error" role="alert">보완 내용을 저장하지 못했습니다. 내용을 유지했으니 다시 시도해 주세요.</p> : null}
-            <div className="rq-supplement-form-actions"><button type="button" className="quiet" disabled={supplementBusy} onClick={() => cancelSupplement(comment.id)}>취소</button><button type="submit" className="outline-mint" disabled={supplementBusy || hasApplied || !supplementDrafts[comment.id]?.trim()}>{savingSupplementId === comment.id ? <LoaderCircle size={13} className="spinning"/> : null}추가 저장</button></div>
-          </form> : null}
-        </article>;
-      })}
+      {visible.length === 0 ? <div className="empty-requests"><MessageSquare size={24}/><p>{comments.length === 0 ? '아직 피드백이 없습니다.' : searchQuery.trim() ? '검색에 맞는 피드백이 없습니다.' : '이 분류의 피드백이 없습니다.'}</p>{searchQuery || filter !== 'all' ? <button type="button" className="outline-mint" onClick={resetListFilters}>검색·필터 초기화</button> : null}</div> : visible.map(comment => <FeedbackCard key={comment.id} comment={comment} selected={selectedId === comment.id} shared={cardShared}/>)}
     </div>
   </section>;
+});
+
+/**
+ * One feedback card. Memoized so selecting, stepping or typing elsewhere re-renders only the cards that changed:
+ * `shared` keeps its identity until a value any card reads actually changes.
+ */
+const FeedbackCard = memo(function FeedbackCard({ comment, selected, shared }: { comment: Comment; selected: boolean; shared: CardShared }) {
+  const { opsByComment, editingMode, busy, savingSupplementId, savingCommentId, deletingCommentId, commentDrafts, editingCommentId, supplementDrafts, versionsById, projections, drawingStates, contextBundles, bundleRevisions, currentVersion, numberById, supplementing, versions, failedCommentId, attachmentsByComment, transcribingId, editing, editValue, previewOpId, positioning, preparingBundleId, failedSupplementId } = shared;
+  const { setSupplementing, setFailedSupplementId, setResumeSupplementId, setCommentDrafts, setFailedCommentId, setEditValue, setPositioning, setSupplementDrafts } = shared;
+  const { selectFromList, startCommentEdit, deleteComment, saveCommentEdit, cancelCommentEdit, onSelectAuthored, saveEdit, startEdit, onOp, onPreviewOverlay, operationBlocked, prepareContext, onInterpret, saveSupplement, cancelSupplement, onTranscribe } = shared;
+    const related = opsByComment.get(comment.id) ?? [];
+    const supplements = comment.supplements ?? [];
+    const isNote = comment.kind === 'note';
+    const isLayerChange = Boolean(comment.layerChange);
+    const hasApplied = comment.status === 'applied' || related.some(op => op.status === 'applied');
+    const hasApproved = comment.status === 'approved' || related.some(op => op.status === 'approved');
+    const needsClarification = Boolean(comment.clarification) || related.some(op => op.status === 'needs_clarification');
+    const showInterpret = editingMode && !isNote && !isLayerChange && (related.length === 0 || needsClarification || supplements.length > 0);
+    const supplementBusy = busy || savingSupplementId !== null || savingCommentId !== null || deletingCommentId !== null;
+    const commentDraft = commentDrafts[comment.id];
+    const unsavedEdit = Boolean(commentDraft && isChangedDraft(commentDraft));
+    const commentEditorOpen = editingCommentId === comment.id && Boolean(commentDraft);
+    const canSaveEdit = unsavedEdit && Boolean(commentDraft.text.trim() || comment.voiceAssetId || comment.drawings.length || comment.attachmentIds.length || isNote && commentDraft.sceneDescription.trim());
+    const unsavedSupplement = Boolean(supplementDrafts[comment.id]?.trim());
+    const opBusy = supplementBusy || unsavedEdit || unsavedSupplement;
+    const authored = versionsById.get(comment.versionId);
+    const projection = projections.get(comment.id)!;
+    const drawingState = drawingStates.get(comment.id)!;
+    const prepared = contextBundles[comment.id];
+    const bundle = prepared?.revision === bundleRevisions.get(comment.id) ? prepared.result : undefined;
+    const differentVersion = comment.versionId !== currentVersion.id;
+    const mappedLabel = projection.status === 'deleted' ? '현재 버전에서 삭제된 구간' : projection.status === 'unavailable' ? '현재 버전에서 위치 확인 불가' : projection.ranges.map(range => rangeLabel(range.frameIn, range.frameOut)).join(', ');
+    const index = numberById.get(comment.id)!;
+    const showAuthoredPosition = differentVersion || !authored || projection.status !== 'present';
+    const supplementButton = !isLayerChange ? <button type="button" id={`supplement-feedback-${comment.id}`} className="quiet rq-supplement-toggle" aria-label={isNote ? '메모 추가' : '추가 지시'} disabled={supplementBusy || hasApplied} aria-expanded={supplementing === comment.id} aria-controls={supplementing === comment.id ? `supplement-form-${comment.id}` : undefined} onClick={() => { setSupplementing(comment.id); setFailedSupplementId(null); setResumeSupplementId(comment.id); }} title={hasApplied ? '이미 적용된 요청입니다. 새 요청을 남겨 주세요.' : isNote ? '원문을 유지하고 메모를 덧붙입니다.' : '원문을 유지하고 편집 지시를 덧붙입니다.'}><Plus size={14}/><span className="rq-action-text">{isNote ? '메모 추가' : '추가 지시'}</span></button> : null;
+    const cardActions = <div className="rq-card-actions" role="group" aria-label={`피드백 ${index} 관리`}>
+        <button type="button" id={`edit-feedback-${comment.id}`} className="rq-card-action rq-edit-button" disabled={supplementBusy || hasApplied || isLayerChange || commentEditorOpen} onClick={() => startCommentEdit(comment)} aria-label={`피드백 ${index} 수정`} aria-keyshortcuts="F2" title={hasApplied || isLayerChange ? '이미 적용된 요청과 그래픽 변경은 새 피드백으로 남겨 주세요.' : '수정 · F2 또는 본문 두 번 클릭'}><PencilLine size={15} aria-hidden="true"/></button>
+        <button type="button" id={`delete-feedback-${comment.id}`} className="rq-card-action rq-delete-button" disabled={supplementBusy || unsavedEdit || unsavedSupplement} onClick={() => void deleteComment(comment)} aria-label={`피드백 ${index} 삭제`} aria-keyshortcuts="Shift+Delete" aria-busy={deletingCommentId === comment.id} title={unsavedEdit || unsavedSupplement ? '작성 중인 내용을 먼저 저장하거나 취소하세요.' : '삭제 · Shift + Delete · 삭제 후 되돌릴 수 있습니다.'}>{deletingCommentId === comment.id ? <LoaderCircle size={15} className="spinning" aria-hidden="true"/> : <Trash2 size={15} aria-hidden="true"/>}</button>
+      </div>;
+    return <article id={`request-${comment.id}`} data-feedback-id={comment.id} data-feedback-category={feedbackCategory(comment)} className={`request-item ${selected ? 'selected' : ''}`} tabIndex={0} aria-label={`피드백 ${index}`} onFocus={event => { if (event.target === event.currentTarget && !supplementBusy) selectFromList(comment); }}>
+      <div className="rq-card-heading">
+      <button id={`locate-feedback-${comment.id}`} className="request-location rq-projected-location" disabled={supplementBusy} onClick={() => selectFromList(comment)} aria-label={`요청 ${index}, 현재 버전 v${currentVersion.number}, ${mappedLabel}`}>
+        <span className="rq-location-content">
+          {projection.status === 'deleted' || projection.status === 'unavailable' ? <span className={`rq-projection-message ${projection.status}`}>{mappedLabel}</span> : <span className="rq-projected-ranges">{projection.ranges.map((range, rangeIndex) => {
+            const isPoint = range.frameOut - range.frameIn === 1;
+            return <span className="rq-time-range" key={rangeIndex} title={isPoint ? '피드백 시점' : '피드백 구간 · 끝 시점은 포함하지 않음'}>{isPoint ? <Clock3 size={13} aria-hidden="true"/> : <Brackets size={13} aria-hidden="true"/>}<span className="rq-time-value">{time(range.frameIn)}</span>{!isPoint ? <><span className="rq-time-separator" aria-hidden="true">–</span><span className="rq-time-value">{time(range.frameOut)}</span></> : null}</span>;
+          })}</span>}
+          <span className="rq-current-version"><span className={`request-number ${related.some(op => op.status === 'approved' || op.status === 'applied') ? 'approved' : ''}`}>{index}</span>{versions.length > 1 ? <span className="rq-version-label">v{currentVersion.number}</span> : null}<span className="feedback-category-label"><span className="feedback-category-dot" aria-hidden="true"/>{FEEDBACK_CATEGORY_LABELS[feedbackCategory(comment)]}</span></span>
+        </span>
+      </button>
+      <div className="rq-card-side-actions">{!editingMode ? supplementButton : null}{cardActions}</div>
+      </div>
+      {showAuthoredPosition || comment.updatedAt ? <div className="rq-authored-position">{showAuthoredPosition ? <span>{authored ? `작성 v${authored.number}` : '작성 버전 정보 없음'} · {rangeLabel(comment.frameIn, comment.frameOut)}</span> : null}{comment.updatedAt ? <span className="rq-edited-label" title={supplementTime(comment.updatedAt)}>수정됨</span> : null}{differentVersion ? <button className="quiet" disabled={supplementBusy || !authored} onClick={() => onSelectAuthored(comment)} title={!authored ? '작성 버전 정보를 찾을 수 없습니다.' : '요청을 작성한 버전과 원래 프레임을 엽니다.'}>{authored ? `작성 v${authored.number} 보기` : '작성 버전 보기'}</button> : null}</div> : null}
+      {projection.status === 'partial' ? <p className="rq-projection-note">현재 버전에 표시할 수 있는 일부 구간만 보입니다.</p> : null}
+      {projection.contextStatus === 'deleted' ? <p className="rq-projection-note">요청을 남긴 기준 장면은 삭제됨</p> : null}
+      {comment.drawings.length > 0 ? <p className="rq-projection-note">그림 {comment.drawings.length}개 · 현재 {drawingState.scenes}개 장면{drawingState.deleted ? ` · 삭제된 장면의 그림 ${drawingState.deleted}개` : ''}{drawingState.unavailable ? ` · 위치 확인 불가 ${drawingState.unavailable}개` : ''}</p> : null}
+      {editingMode && !isNote ? <p className="rq-authored-target">{isLayerChange ? '수정·제거 승인은' : '해석·승인은'} {authored ? `작성 v${authored.number}` : '작성 버전'} 기준입니다.{differentVersion && authored ? ' 실행하려면 해당 버전을 여세요.' : ''}</p> : null}
+      {comment.kind === 'note' ? <span className="request-kind-note"><FileText size={12}/>보관된 메모</span> : null}
+      {!commentEditorOpen && comment.sceneDescription ? <div className="rq-scene-description"><span>장면 내용 · 직접 작성</span><p>{comment.sceneDescription}</p></div> : null}
+      {!commentEditorOpen ? <p className="request-text" onDoubleClick={() => startCommentEdit(comment)} title={hasApplied || isLayerChange ? undefined : '두 번 클릭해서 수정'}>{comment.text || (comment.voiceAssetId ? '음성 지시가 저장되었습니다.' : comment.attachmentIds.length ? '첨부 자료가 저장되었습니다.' : comment.sceneDescription ? '장면 기록' : '그림으로 남긴 피드백')}</p> : <form className="rq-comment-editor" aria-label="저장된 피드백 수정" onSubmit={event => { event.preventDefault(); void saveCommentEdit(comment); }} onKeyDown={event => { if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return; if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); cancelCommentEdit(comment.id); } }}>
+        <div className="rq-editor-heading"><PencilLine size={14}/><strong>피드백 수정</strong><span>시간·그림 유지</span></div>
+        {!isNote ? <FeedbackCategorySelect value={commentDraft.category} label="수정할 피드백 분야" disabled={supplementBusy} onChange={value => { if (value !== 'note') setCommentDrafts(drafts => ({ ...drafts, [comment.id]: { ...drafts[comment.id], category: value } })); }}/> : null}
+        <label htmlFor={`comment-scene-${comment.id}`}>장면 내용 <span>선택</span></label>
+        <SubmitTextarea rows={1} maxHeight={96} onSubmit={() => { if (canSaveEdit) void saveCommentEdit(comment); }} id={`comment-scene-${comment.id}`} className="rq-scene-editor" value={commentDraft.sceneDescription} maxLength={500} disabled={supplementBusy} placeholder="이때 영상에 어떤 내용이 나오나요?" onChange={event => { const sceneDescription = event.target.value; setCommentDrafts(drafts => ({ ...drafts, [comment.id]: { ...drafts[comment.id], sceneDescription } })); setFailedCommentId(null); }}/>
+        <label htmlFor={`comment-text-${comment.id}`}>{isNote ? '메모 내용' : '편집 피드백'}</label>
+        <SubmitTextarea rows={2} maxHeight={220} onSubmit={() => { if (canSaveEdit) void saveCommentEdit(comment); }} aria-keyshortcuts="Enter" id={`comment-text-${comment.id}`} value={commentDraft.text} maxLength={5000} disabled={supplementBusy} placeholder="어떤 부분을 어떻게 바꿀까요?" onChange={event => { const text = event.target.value; setCommentDrafts(drafts => ({ ...drafts, [comment.id]: { ...drafts[comment.id], text } })); setFailedCommentId(null); }}/>
+        {related.length > 0 && (commentDraft.text !== commentDraft.originalText || commentDraft.sceneDescription !== commentDraft.originalSceneDescription) ? <p className="rq-supplement-approval">수정하면 기존 해석과 승인을 해제합니다.</p> : null}
+        {failedCommentId === comment.id ? <p className="rq-supplement-error" role="alert">저장하지 못했습니다. 수정한 내용은 유지됩니다.</p> : null}
+        <div className="rq-editor-footer"><span title="Enter로 저장 · Shift + Enter로 줄바꿈 · Esc로 취소"><kbd>Enter</kbd> 저장 · <kbd>Esc</kbd> 취소</span><div><button type="button" className="quiet" disabled={supplementBusy} onClick={() => cancelCommentEdit(comment.id)}>취소</button><button type="submit" className="outline-mint" disabled={supplementBusy || !canSaveEdit}>{savingCommentId === comment.id ? <LoaderCircle size={13} className="spinning"/> : <Check size={13}/>}수정 저장</button></div></div>
+      </form>}
+      {supplements.length > 0 ? <ol className="rq-supplement-history" aria-label={isNote ? '메모 보완 기록' : '추가 지시 기록'}>{supplements.map((supplement, supplementIndex) => <li key={supplement.id}><div><span>{isNote ? '메모 보완' : '추가 지시'} {supplementIndex + 1}</span><time dateTime={supplement.createdAt}>{supplementTime(supplement.createdAt)}</time></div><p>{supplement.text}</p></li>)}</ol> : null}
+      <AttachmentGallery compact disabled={busy} onTranscribe={onTranscribe} transcribingId={transcribingId} attachments={attachmentsByComment.get(comment.id)!}/>
+      {comment.clarification ? <p className="clarification">{comment.clarification}</p> : null}
+      {(editingMode || isLayerChange ? related : []).map(op => {
+        const Icon = icons[op.type];
+        const removing = op.layerChange?.action === 'remove';
+        const operationLabel = op.layerChange ? `${op.type === 'subtitle' ? '자막' : '그래픽'} ${removing ? '제거' : '수정'}` : labels[op.type];
+        const canEdit = editingMode && !removing && (['speed','subtitle','audio'].includes(op.type) || op.type === 'overlay' && op.params.kind === 'text') && op.status !== 'applied';
+        const canPosition = editingMode && !removing && op.type === 'overlay' && op.params.kind !== 'drawing' && op.status !== 'applied' && op.status !== 'needs_clarification';
+        const status = op.type === 'note' ? '보관된 메모' : op.status === 'applied' ? '적용됨' : op.status === 'approved' ? '승인됨' : op.status === 'rejected' ? '제외됨' : op.status === 'needs_clarification' ? '보완 필요' : '승인 대기';
+        return <div key={op.id} className={`op-area ${op.status === 'rejected' ? 'rejected' : ''}`}>
+          <div className="op-description"><Icon size={17}/><span>{operationLabel}{op.type === 'speed' ? ` ${op.params.factor}× · ${duration(op.frameOut-op.frameIn)} → ${duration((op.frameOut-op.frameIn)/(op.params.factor || 1))}` : op.type === 'subtitle' && !removing ? ` · ${duration(op.frameOut-op.frameIn)}` : ''}</span></div>
+          {op.type === 'speed' ? <small className="op-detail">원본 속도 기준</small> : null}
+          {removing ? <small className="op-detail">다음 버전에서 이 그래픽 제거 · 이전 버전 유지</small> : null}
+          {op.interpreter === 'manual' ? <small className="op-detail">직접 지정한 변경 · 기존 적용 구간 유지</small> : null}
+          {!removing && op.type === 'subtitle' ? <small className="op-detail">“{op.params.text}”</small> : null}
+          {!removing && op.type === 'overlay' ? <small className="op-detail">{op.params.kind === 'drawing' ? `그림·도형 ${op.params.drawings?.length ?? 0}개 · 지정 구간에 표시` : op.params.kind === 'image' ? '삽입 이미지 · 원본 비율 유지' : op.params.kind === 'box' ? '도형 표시' : `“${op.params.text}”`}</small> : null}
+          {editingMode && editing === op.id ? <form className="op-editor" onSubmit={e => { e.preventDefault(); void saveEdit(op); }}><input disabled={opBusy} aria-label={`${operationLabel} 값 수정`} type={op.type === 'subtitle' || op.type === 'overlay' ? 'text' : 'number'} min={op.type === 'speed' ? 0.25 : 0} max={op.type === 'speed' ? 4 : 2} step="any" value={editValue} onChange={e => setEditValue(e.target.value)}/><button disabled={opBusy} className="outline-mint">저장</button></form> : <div className="op-actions"><span className={`op-status ${op.status}`}>{op.status === 'applied' || op.status === 'approved' ? <Check size={13}/> : null}{status}</span>
+            {canEdit ? <button className="quiet" disabled={opBusy} onClick={() => startEdit(op)} aria-label={`${operationLabel} 값 수정`}><SlidersHorizontal size={14}/>수정</button> : null}
+            {editingMode && op.type !== 'note' && op.status === 'proposed' ? <button disabled={opBusy} className="outline-mint" onClick={() => void onOp(op.id, { status: 'approved' })}>승인</button> : null}
+            {editingMode && op.status === 'approved' ? <button className="quiet" disabled={opBusy} onClick={() => void onOp(op.id, { status: 'proposed' })} aria-label="승인 취소"><RotateCcw size={14}/></button> : null}
+            {editingMode && op.status === 'proposed' ? <button className="quiet icon" disabled={opBusy} onClick={() => void onOp(op.id, { status: 'rejected' })} aria-label="요청 제외"><X size={14}/></button> : null}
+          </div>}
+          {canPosition ? <div className="overlay-placement-actions"><button className={`quiet ${previewOpId === op.id ? 'mint-text' : ''}`} disabled={opBusy} onClick={() => { setPositioning(positioning === op.id ? null : op.id); if (op.params.kind === 'image' && !op.layerChange) onPreviewOverlay?.(op.id); }}><SlidersHorizontal size={14}/>위치·크기</button>{previewOpId === op.id ? <small>영상 위에서 조절 중</small> : null}</div> : null}
+          {canPosition && positioning === op.id ? <RegionEditor key={JSON.stringify(op.region)} op={op} busy={opBusy} onSave={region => operationBlocked(op) ? Promise.resolve(false) : onOp(op.id, { region, status: 'proposed' })}/> : null}
+        </div>;
+      })}
+      {editingMode && related.length > 0 && (unsavedEdit || unsavedSupplement) ? <p className="rq-comment-guidance">피드백 수정을 먼저 저장하거나 취소한 뒤 편집 명령을 변경하세요.</p> : null}
+      {editingMode ? <div className="rq-comment-actions">{supplementButton}
+        {editingMode ? <button className="quiet" disabled={supplementBusy || unsavedSupplement || unsavedEdit || preparingBundleId !== null || !authored} onClick={() => void prepareContext(comment)} title={unsavedSupplement || unsavedEdit ? '작성 중인 내용을 먼저 저장한 뒤 자료를 준비하세요.' : '저장된 요청·그림·관련 장면·첨부를 이 PC에서 자료로 준비합니다. 외부 AI에 전송하지 않습니다.'}>{preparingBundleId === comment.id ? <LoaderCircle size={13} className="spinning"/> : <FileText size={13}/>}AI용 자료 준비</button> : null}
+        {showInterpret ? <button className="outline-mint" disabled={supplementBusy || unsavedSupplement || unsavedEdit || hasApproved || hasApplied} onClick={() => void onInterpret(comment.id)} title={unsavedSupplement || unsavedEdit ? '작성 중인 내용을 먼저 저장한 뒤 해석하세요.' : hasApplied ? '적용된 요청은 다시 해석할 수 없습니다. 새 요청을 남겨 주세요.' : hasApproved ? '기존 승인을 취소하거나 지시를 보완한 뒤 해석하세요.' : '원문과 추가 지시를 함께 해석합니다.'}>요청 해석</button> : null}
+      </div> : null}
+      {editingMode && bundle ? <div className="rq-context-bundle" role="status"><p>로컬 자료 준비됨 · 영상 {bundle.sceneCount}장 · 첨부 {bundle.attachmentCount}개</p><div>{bundle.archiveUrl ? <a className="quiet" href={bundle.archiveUrl} download>자료 묶음 받기</a> : null}<a className="quiet" href={bundle.manifestUrl} target="_blank" rel="noreferrer">자료 목록</a><span>외부 전송 없음</span></div></div> : null}
+      {hasApplied ? <p className="rq-comment-guidance">{editingMode && related.some(op => op.type === 'overlay' || op.type === 'subtitle') ? '자막·그래픽 변경은 현재 버전의 ‘적용된 자막·그래픽’에서 요청하세요.' : '이미 적용된 요청입니다. 변경하려면 새 요청을 남겨 주세요.'}</p> : showInterpret && hasApproved ? <p className="rq-comment-guidance">승인된 명령이 있습니다. 승인을 취소하거나 지시를 보완한 뒤 다시 해석하세요.</p> : editingMode && supplements.length > 0 && !isNote && (comment.status === 'received' || related.length === 0) ? <p className="rq-comment-guidance">추가 지시가 저장되었습니다. 요청 해석을 눌러 편집 명령을 준비하세요.</p> : null}
+      {!isLayerChange && supplementing === comment.id ? <form id={`supplement-form-${comment.id}`} className="rq-supplement-form" onSubmit={event => { event.preventDefault(); void saveSupplement(comment, hasApplied); }}>
+        <label htmlFor={`supplement-${comment.id}`}>{isNote ? '메모 보완' : '피드백 보완'}</label>
+        <SubmitTextarea rows={2} maxHeight={176} onSubmit={() => void saveSupplement(comment, hasApplied)} aria-keyshortcuts="Enter" id={`supplement-${comment.id}`} aria-label={isNote ? '메모 보완 내용' : '추가 편집 지시 내용'} value={supplementDrafts[comment.id] ?? ''} maxLength={5000} disabled={supplementBusy || hasApplied} placeholder={isNote ? '기존 메모에 덧붙일 내용을 입력하세요.' : '어떤 부분을 어떻게 바꿀지 더 알려주세요.'} onChange={event => { const value = event.target.value; setSupplementDrafts(drafts => ({ ...drafts, [comment.id]: value })); setFailedSupplementId(null); }} onKeyDown={event => { if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return; if (event.key === 'Escape' && !supplementBusy) { event.preventDefault(); event.stopPropagation(); cancelSupplement(comment.id); } }} />
+        {hasApproved ? <p className="rq-supplement-approval">추가 지시를 저장하면 이전 승인이 해제됩니다.</p> : null}
+        {!hasApplied ? <p className="rq-supplement-help">{isNote ? '원문을 유지하고 보완 기록으로 저장합니다.' : editingMode ? '원문을 유지합니다. 저장 후 요청 해석을 눌러 주세요.' : '원문과 보완 내용을 함께 전달 자료에 담습니다.'}</p> : null}
+        {failedSupplementId === comment.id ? <p className="rq-supplement-error" role="alert">보완 내용을 저장하지 못했습니다. 내용을 유지했으니 다시 시도해 주세요.</p> : null}
+        <div className="rq-supplement-form-actions"><button type="button" className="quiet" disabled={supplementBusy} onClick={() => cancelSupplement(comment.id)}>취소</button><button type="submit" className="outline-mint" disabled={supplementBusy || hasApplied || !supplementDrafts[comment.id]?.trim()}>{savingSupplementId === comment.id ? <LoaderCircle size={13} className="spinning"/> : null}추가 저장</button></div>
+      </form> : null}
+    </article>;
 });
 
 function RegionEditor({ op, busy, onSave }: { op: EditOp; busy: boolean; onSave: (region: Region) => Promise<unknown> }) {

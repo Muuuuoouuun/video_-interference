@@ -585,3 +585,20 @@ dialog[open]::backdrop { animation: vi-fade-in var(--motion-base) var(--ease-out
 .rq-supplement-form textarea { min-height: 56px; max-height: 176px; resize: none; }
 .rq-editor-footer > span { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 3px; font-size: 11px; }
 @media (min-width: 901px) { .request-rail .composer .composer-feedback-field > textarea { min-height: 36px; } }
+
+/* List speed · 2026-11-14
+   Cards outside the scrolled area skip layout and paint; the remembered size keeps the scrollbar steady. */
+.request-list > .request-item { content-visibility: auto; contain-intrinsic-size: auto 92px; }
+
+/* Review state of the dock · 2026-11-14
+   The read-only drawing note takes one line, so selecting saved feedback keeps the dock within its height. */
+.vi-directing-dock[data-compact="false"] .oe-readonly-context { display: flex; align-items: baseline; gap: 4px 14px; flex-wrap: wrap; padding: 0 0 2px; border-bottom: 0; }
+.vi-directing-dock[data-compact="false"] .oe-readonly-context > .oe-frame-context { flex: 1 1 auto; min-width: 0; padding-top: 0; }
+.vi-directing-dock[data-compact="false"] .oe-readonly-context > .oe-editor-status { flex: 0 1 auto; min-width: 0; padding-top: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vi-directing-dock[data-compact="false"] .oe-readonly-context .oe-frame-summary { justify-content: flex-start; gap: 4px 12px; }
+.vi-workspace:not([data-timeline-simple="true"], [data-timeline-compact="true"]) .vi-marker-rail { height: 36px; margin: 0; }
+.vi-workspace:not([data-timeline-simple="true"], [data-timeline-compact="true"]) .vi-timeline { margin-top: 2px; }
+.vi-workspace .vi-selection { padding: 4px 0; }
+.vi-directing-dock[data-compact="false"] > .vi-timeline-area { padding-top: 0; }
+.vi-details .vi-details-toggle { min-height: 26px; padding: 2px 10px; }
+.vi-directing-dock[data-compact="false"] > .vi-review-toolbar { padding: 3px 0; }

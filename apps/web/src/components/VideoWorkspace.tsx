@@ -8,6 +8,7 @@ import { createRangePlaybackController } from '../../../../packages/core/range-p
 import type { PlaybackCommand } from '../../../../packages/core/range-playback.mjs';
 import { createTimelineRangeGesture, markTimelineRange } from '../../../../packages/core/timeline-range.mjs';
 import { shortcutKey } from '../../../../packages/core/shortcut-key.mjs';
+import { MOD } from '../platform';
 import type { TimelineRangeGesture } from '../../../../packages/core/timeline-range.mjs';
 import { OverlayEditor } from './OverlayEditor';
 import { ImagePlacementOverlay } from './ImagePlacementOverlay';
@@ -577,7 +578,7 @@ export function VideoWorkspace({ version, versions, asset, comments, attachments
         <div className="vi-view-tools" role="group" aria-label="영상 보기 도구" onPointerDown={event => event.stopPropagation()}>
           <button className="vi-view-button" disabled={preview.rect.zoom <= 1} onClick={() => preview.zoom(-1)} aria-label="영상 축소" title="축소 (-)"><Minus size={16}/></button>
           <button className="vi-view-fit" onClick={preview.reset} aria-label="영상 화면에 맞추기" title="화면 맞춤 (0) · 보기 확대는 출력에 적용되지 않습니다">{preview.rect.zoom === 1 ? '맞춤' : `${Math.round(preview.rect.zoom * 100)}%`}</button>
-          <button className="vi-view-button" disabled={preview.rect.zoom >= 4} onClick={() => preview.zoom(1)} aria-label="영상 확대" title="확대 (+) · Ctrl / ⌘ + 휠"><Plus size={16}/></button>
+          <button className="vi-view-button" disabled={preview.rect.zoom >= 4} onClick={() => preview.zoom(1)} aria-label="영상 확대" title={`확대 (+) · ${MOD} + 휠`}><Plus size={16}/></button>
           <button className="vi-view-button" onClick={() => setMuted(value => !value)} aria-pressed={muted} aria-label={muted ? '영상 소리 켜기' : '영상 음소거'} title="보기용 음소거 (M)">{muted ? <VolumeX size={16}/> : <Volume2 size={16}/>}</button>
           <button className="vi-view-button" onClick={() => void toggleFullscreen()} aria-label={fullscreen ? '전체 화면 종료' : '영상 전체 화면'} title="전체 화면 (F) · Esc 종료">{fullscreen ? <Minimize size={16}/> : <Maximize size={16}/>}</button>
         </div>

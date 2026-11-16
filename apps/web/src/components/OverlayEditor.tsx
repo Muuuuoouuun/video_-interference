@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { shortcutKey } from '../../../../packages/core/shortcut-key.mjs';
+import { MOD } from '../platform';
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { ArrowDownToLine, ArrowUpToLine, ChevronDown, ChevronLeft, Copy, SlidersHorizontal, ArrowUpRight, Circle, CornerUpLeft, CornerUpRight, Eraser, MousePointer2, Pencil, Plus, RotateCcw, Slash, Square, Trash2, Type, X } from 'lucide-react';
@@ -603,7 +604,7 @@ export const OverlayEditor = memo(function OverlayEditor({ drawings, currentFram
         const anchor = event.currentTarget.getBoundingClientRect();
         setPopover(current => current ? null : { anchor, ...(selected?.kind === 'text' ? { textId: selected.id } : {}) });
       }} title="스타일과 편집"><i style={{ background: style.color }}/><span>{selected ? '편집' : textStyle ? `${Math.round(style.fontSize)} 글자` : `${style.strokeWidth} 선`}</span><SlidersHorizontal size={13}/></button>
-      <div className="oe-history-actions"><button disabled={blocked || !enabled || !history?.canUndo} onClick={undo} aria-label="그림 편집 되돌리기" title="전체 그림 기록 되돌리기 (⌘/Ctrl Z)"><CornerUpLeft size={16} /></button><button disabled={blocked || !enabled || !history?.canRedo} onClick={redo} aria-label="그림 편집 다시 실행" title="전체 그림 기록 다시 실행 (⌘/Ctrl Shift Z)"><CornerUpRight size={16} /></button><span className="oe-toolbar-divider" /><button disabled={blocked || !enabled || !selected} onClick={deleteSelected} aria-label="선택한 그림 삭제" title="선택 삭제 (Delete)"><Trash2 size={15} /></button><button disabled={blocked || !enabled || !visibleDrawings.length} onClick={clearCurrentFrame} aria-label="현재 프레임 그림 지우기" title="현재 프레임 그림만 지우기"><Eraser size={16} /></button></div>
+      <div className="oe-history-actions"><button disabled={blocked || !enabled || !history?.canUndo} onClick={undo} aria-label="그림 편집 되돌리기" title={`전체 그림 기록 되돌리기 (${MOD} + Z)`}><CornerUpLeft size={16} /></button><button disabled={blocked || !enabled || !history?.canRedo} onClick={redo} aria-label="그림 편집 다시 실행" title={`전체 그림 기록 다시 실행 (${MOD} + Shift + Z)`}><CornerUpRight size={16} /></button><span className="oe-toolbar-divider" /><button disabled={blocked || !enabled || !selected} onClick={deleteSelected} aria-label="선택한 그림 삭제" title="선택 삭제 (Delete)"><Trash2 size={15} /></button><button disabled={blocked || !enabled || !visibleDrawings.length} onClick={clearCurrentFrame} aria-label="현재 프레임 그림 지우기" title="현재 프레임 그림만 지우기"><Eraser size={16} /></button></div>
       {onInsertDrawings ? <button className="oe-insert-button" disabled={blocked || !enabled || !drawings.length || multipleFrames} onClick={() => { endEditGroup(); if (!multipleFrames) onInsertDrawings(); }} title={multipleFrames ? '원하는 장면만 복사한 요청에서 영상에 넣어 주세요.' : '이 그림으로 영상 삽입 요청을 만듭니다. 승인 후 렌더에 적용됩니다.'}><Plus size={14} />영상에 넣기</button> : null}
     </div>;
   const stylePanel = popover && !readOnly ? <div ref={popoverRef} id={`${ownerId}-style`} className="oe-toolbar oe-style-popover" data-overlay-owner={ownerId} role="dialog" aria-label={editingText ? '텍스트 입력' : '그림 스타일'} tabIndex={-1}
@@ -613,7 +614,7 @@ export const OverlayEditor = memo(function OverlayEditor({ drawings, currentFram
       else if (editingText && (event.metaKey || event.ctrlKey) && event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); submitText(); }
     }}>
     <header><strong>{editingText ? popover.textId ? '텍스트 수정' : '텍스트 넣기' : `${TOOL_OPTIONS.find(item => item.id === (selected?.kind ?? tool))?.label ?? '그림'} 스타일`}</strong><button type="button" aria-label="스타일 팝업 닫기" onClick={() => closePopover(true)}><X size={14}/></button></header>
-    {editingText ? <label className="oe-text-entry">내용<textarea ref={textInputRef} aria-label="영상 위 텍스트 내용" value={textDraft} maxLength={MAX_DRAWING_TEXT} rows={3} placeholder="영상 위에 남길 텍스트" onChange={event => setTextDraft(event.target.value)}/><small>{drawingTextLines(textDraft).length > MAX_DRAWING_TEXT_LINES ? '최대 8줄까지 입력할 수 있습니다.' : '최대 500자 · 8줄 · ⌘ / Ctrl + Enter 적용'}</small></label> : null}
+    {editingText ? <label className="oe-text-entry">내용<textarea ref={textInputRef} aria-label="영상 위 텍스트 내용" value={textDraft} maxLength={MAX_DRAWING_TEXT} rows={3} placeholder="영상 위에 남길 텍스트" onChange={event => setTextDraft(event.target.value)}/><small>{drawingTextLines(textDraft).length > MAX_DRAWING_TEXT_LINES ? '최대 8줄까지 입력할 수 있습니다.' : `최대 500자 · 8줄 · ${MOD} + Enter 적용`}</small></label> : null}
     <div className="oe-style-controls" aria-label="그림 스타일">
       <span className="oe-style-target">{editingText ? popover?.textId ? '텍스트 수정' : '새 텍스트' : selected ? '선택한 그림' : '새 그림'}</span>
       <div className="oe-style-preview" aria-label="스타일 미리보기"><svg viewBox="0 0 240 48" aria-hidden="true">
@@ -628,7 +629,7 @@ export const OverlayEditor = memo(function OverlayEditor({ drawings, currentFram
     </div>
 
     {selected ? <div className="oe-object-actions" role="group" aria-label="선택한 그림 편집">
-      <button disabled={drawings.length >= SHAPE_LIMIT || blocked || !enabled || editingText && textDraft !== selected.text} onClick={duplicateSelected} title={editingText && textDraft !== selected.text ? '텍스트를 적용한 뒤 복제하세요' : '⌘ / Ctrl + D'}><Copy size={14}/>복제</button>
+      <button disabled={drawings.length >= SHAPE_LIMIT || blocked || !enabled || editingText && textDraft !== selected.text} onClick={duplicateSelected} title={editingText && textDraft !== selected.text ? '텍스트를 적용한 뒤 복제하세요' : `${MOD} + D`}><Copy size={14}/>복제</button>
       <button disabled={visibleDrawings.at(-1)?.id === selected.id || blocked || !enabled} onClick={() => reorderSelected('front')}><ArrowUpToLine size={14}/>맨 앞으로</button>
       <button disabled={visibleDrawings[0]?.id === selected.id || blocked || !enabled} onClick={() => reorderSelected('back')}><ArrowDownToLine size={14}/>맨 뒤로</button>
     </div> : null}
