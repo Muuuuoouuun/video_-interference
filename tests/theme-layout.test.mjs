@@ -18,11 +18,13 @@ test('the feedback list scrolls on its own while the composer stays pinned in th
   assert.match(rule('.request-rail .composer-wrap'), /max-height:/, 'a long draft scrolls inside the composer instead of pushing the list out');
 });
 
-test('offscreen cards skip rendering with a remembered size, and the composer grows from one line', () => {
+test('offscreen cards skip rendering with a remembered size, and the composer input grows with its text', () => {
   const cards = rule('.request-list > .request-item');
   assert.match(cards, /content-visibility:\s*auto/);
   assert.match(cards, /contain-intrinsic-size:\s*auto\s+\d+px/);
-  assert.match(rule('.composer .composer-feedback-field > textarea'), /min-height:\s*36px;[^}]*resize:\s*none/);
+  assert.match(rule('.composer .composer-feedback-field > textarea'), /resize:\s*none/);
+  assert.match(rule('.composer .composer-submit .composer-submit-label'), /clip:\s*rect\(0 0 0 0\)/, 'the icon-only save button keeps its name for screen readers');
+  assert.match(theme, /\.request-item:hover \.rq-card-side-actions, \.request-panel \.request-item:focus-within \.rq-card-side-actions/, 'row actions also appear for keyboard focus');
 });
 
 // Design scale guard: every stylesheet, so a new component cannot quietly reintroduce the old values.

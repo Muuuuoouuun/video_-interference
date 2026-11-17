@@ -777,3 +777,26 @@ dialog[open]::backdrop { animation: vi-fade-in var(--motion-base) var(--ease-out
 .app-crash h1 { margin: 0 0 8px; font-size: 17px; }
 .app-crash p { margin: 0 0 14px; color: var(--text-secondary); font-size: 13px; line-height: 1.6; }
 .app-crash pre { max-height: 96px; margin: 0 0 14px; padding: 8px 10px; overflow: auto; border-radius: 6px; background: var(--surface-muted); color: var(--muted); font-size: 11px; white-space: pre-wrap; word-break: break-word; }
+
+/* Feedback rows and composer, second pass · 2026-11-17
+   Timecode on one line with the number and category; row actions sit on the right and appear on hover.
+   The save button is an icon with its key, and the input has more height and air around it. */
+.request-panel .request-list > .request-item { display: block; padding: 9px 8px 10px 10px; }
+.request-panel .request-item > .rq-card-heading { display: flex; align-items: center; gap: 6px; min-height: 24px; margin-bottom: 4px; }
+.request-panel .request-item .rq-card-heading > .request-location { flex: 1 1 auto; width: auto; min-width: 0; align-items: center; }
+.request-panel .request-item .request-location .rq-location-content { display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 2px 8px; }
+.request-panel .request-item .rq-location-content .rq-projected-ranges { display: flex; flex-wrap: wrap; align-items: center; gap: 0 8px; padding-top: 0; }
+.request-panel .request-item .rq-time-range { flex-wrap: nowrap; gap: 0 2px; white-space: nowrap; }
+.request-panel .request-item .rq-time-separator { margin: 0 1px; }
+.request-panel .request-item > *:not(.rq-card-heading) { margin-left: 0; }
+.request-panel .request-item .rq-card-side-actions { flex: 0 0 auto; margin: 0; gap: 0; opacity: 0; transition: opacity var(--motion-fast, 120ms) ease-out; }
+.request-panel .request-item:hover .rq-card-side-actions, .request-panel .request-item:focus-within .rq-card-side-actions, .request-panel .request-item.selected .rq-card-side-actions { opacity: 1; }
+.request-panel .request-item .rq-card-side-actions .rq-supplement-toggle, .request-panel .request-item .rq-card-side-actions .rq-card-action { opacity: 1; }
+@media (hover: none) { .request-panel .request-item .rq-card-side-actions { opacity: 1; } }
+.composer { padding: 10px; }
+.composer .composer-context { margin-bottom: 10px; }
+.composer .composer-feedback-field > textarea { min-height: 60px; }
+@media (min-width: 901px) { .request-rail .composer .composer-feedback-field > textarea { min-height: 60px; } }
+.composer .composer-actions { margin-top: 10px; }
+.composer .composer-actions > .composer-submit { min-height: 28px; height: 28px; padding: 0 8px; gap: 6px; border-radius: 6px; }
+.composer .composer-submit .composer-submit-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
